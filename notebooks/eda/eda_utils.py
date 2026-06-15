@@ -66,6 +66,12 @@ def _get_filesystem():
 
     fs_kwargs = {"region": os.environ.get("AWS_REGION", "eu-central-1")}
     if endpoint:
+        # LocalStack 3.x doesn't return the AWS-style response checksums that
+        # newer aws-sdk-cpp (bundled in pyarrow) validates on GET. Disable
+        # validation for local dev only — real AWS keeps it on by default.
+        os.environ.setdefault("AWS_RESPONSE_CHECKSUM_VALIDATION", "WHEN_REQUIRED")
+        os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "WHEN_REQUIRED")
+
         # strip scheme — pyarrow expects "host:port"
         fs_kwargs["access_key"] = os.environ.get("AWS_ACCESS_KEY_ID", "test")
         fs_kwargs["secret_key"] = os.environ.get("AWS_SECRET_ACCESS_KEY", "test")
@@ -135,7 +141,7 @@ def to_berlin_time(df: pd.DataFrame) -> pd.DataFrame:
 
 def pivot_smard(df: pd.DataFrame) -> pd.DataFrame:
     signals = df["signal"].nunique()
-    logger.info("Pivoting %d rows × %d signals to wide format", len(df), signals)
+    logger.info("Pivoting %d rows x %d signals to wide format", len(df), signals)
 
     wide = df.pivot(index="timestamp", columns="signal", values="value")
     wide.columns.name = None
