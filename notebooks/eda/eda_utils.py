@@ -19,13 +19,13 @@ class SEASON(Enum):
     AUTUMN = "autumn"
 
 SEASON_BY_MONTH = {
-    12: SEASON.WINTER, 1: SEASON.WINTER, 2: SEASON.WINTER,
-    3: SEASON.SPRING, 4: SEASON.SPRING, 5: SEASON.SPRING,
-    6: SEASON.SUMMER, 7: SEASON.SUMMER, 8: SEASON.SUMMER,
-    9: SEASON.AUTUMN, 10: SEASON.AUTUMN, 11: SEASON.AUTUMN,
+    12: SEASON.WINTER.value, 1: SEASON.WINTER.value, 2: SEASON.WINTER.value,
+    3: SEASON.SPRING.value, 4: SEASON.SPRING.value, 5: SEASON.SPRING.value,
+    6: SEASON.SUMMER.value, 7: SEASON.SUMMER.value, 8: SEASON.SUMMER.value,
+    9: SEASON.AUTUMN.value, 10: SEASON.AUTUMN.value, 11: SEASON.AUTUMN.value,
 }
 
-SEASON_ORDER = [SEASON.WINTER, SEASON.SPRING, SEASON.SUMMER, SEASON.AUTUMN]
+SEASON_ORDER = [SEASON.WINTER.value, SEASON.SPRING.value, SEASON.SUMMER.value, SEASON.AUTUMN.value]
 
 
 # Pumped hydro is a storage technology.
@@ -60,6 +60,12 @@ SIGNAL_GROUPS = {
         ENERGY_SOURCE.PUMPED_STORAGE
     ]
 }
+
+def get_all_sources() -> list[str]:
+    return [s.name for s in ENERGY_SOURCE]
+
+def get_sources_by_energy_group(energy_group: ENERGY_GROUP) -> list[str]:
+    return [s.name for s in SIGNAL_GROUPS.get(energy_group, [])]
 
 def _get_filesystem():
     endpoint = os.environ.get("AWS_ENDPOINT_URL")
