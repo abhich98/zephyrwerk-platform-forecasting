@@ -119,3 +119,54 @@ the eight neighbour market price series.
   are increasingly coupled to import availability from neighbours"
   — making neighbour-spread analysis (notebook 05) the most
   strategically important downstream work.
+
+## Notebook 02 — Renewable Seasonality (02_renewable_seasonality)
+
+Analysis of Germany's electricity generation mix from 2019 to 2025,
+drawing on all 12 SMARD generation signals, total consumption, and
+the eight neighbour market price series.
+
+  ### Headline findings
+
+1. **Wind and solar are strongly complementary at every timescale, but increasingly so as you aggregate.** 
+   Daily wind-solar correlation is -0.41; monthly correlation rises to approximately -0.71. 
+   The combined monthly series has a coefficient of variation of 18.3% — **half** of wind alone (36.6%) and
+   **less than** a third of solar alone (61.4%). Adding wind to solar barely increases total monthly volatility 
+   because the two sources cancel each other out seasonally. 
+   This is portfolio diversification operating at the grid scale.
+
+2. **Solar has a strong seasonal and diurnal structure.** Summer noon
+   solar averages ~28 GW; winter noon averages ~9 GW — a 3× swing at
+   the peak hour. Daylight window expands from ~9-15h in winter to
+   ~6-20h in summer.
+
+3. **Wind generation has a meaningful diurnal pattern (~20% variation).**
+   Wind onshore averages 12.8 GW at 19-22h local but only 10.7 GW at
+   10-11h, reflecting the atmospheric boundary layer effect at 100m
+   hub height. Offshore wind shows the same pattern at smaller scale.
+
+4. **Biomass and hydropower follow demand peaks.** Both show a small
+   bimodal diurnal pattern (peaks at 08:00 and 19:00 local time)
+   matching morning and evening consumption peaks — these are
+   dispatchable renewables responding to price signals, not
+   weather-driven generation.
+
+5. **The 2021 European wind drought is visible at monthly resolution.**
+   Total renewable output was meaningfully lower across most of 2021
+   compared to neighbouring years (confirmed in notebook 01).
+
+### Implications for downstream phases
+
+- **Phase 4 ML:** Hour-of-day is a meaningful feature for both the
+  price model and the renewable generation model. Wind speed should
+  be used in combination with hour-of-day to capture the boundary
+  layer effect. The negative wind-solar correlation suggests that
+  including both as separate features (rather than a combined
+  "renewable generation" feature) captures complementary information.
+- **Phase 6 dashboard:** The solar month-by-hour heatmap belongs on
+  the Market Monitor page. "Current renewable output vs typical for
+  this hour and month" is the right framing, not "vs daily average."
+- **Operational insight:** Germany's biggest renewable-light hours
+  are winter mornings (10-11h, low wind + low solar). These are
+  also high-demand hours, suggesting persistent import dependency
+  during winter mornings is a structural feature, not weather noise.
