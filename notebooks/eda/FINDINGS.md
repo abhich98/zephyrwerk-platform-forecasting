@@ -170,3 +170,100 @@ the eight neighbour market price series.
   are winter mornings (10-11h, low wind + low solar). These are
   also high-demand hours, suggesting persistent import dependency
   during winter mornings is a structural feature, not weather noise.
+
+## Notebook 03 — Consumption Patterns (03_consumption_patterns)
+
+Seven-year analysis (2019-01-01 to 2025-12-31) of German electricity
+consumption patterns, combining SMARD TOTAL_CONSUMPTION and RESIDUAL_LOAD
+signals with national-average temperature derived from 4 regional
+Open-Meteo series.
+
+### Headline findings
+
+1. **Consumption declined in two distinct shocks, not gradually.**
+   The 2019-2021 baseline averaged 56-58 GW (2021 peak: 57.6 GW). The
+   2022 gas crisis destroyed ~2.5 GW of demand. The 2023 nuclear
+   phase-out and continued high prices took another ~2.8 GW. Since
+   2024, consumption has stabilized at ~53 GW — about 3.5-4 GW below
+   the pre-crisis baseline. Peak-to-trough (2021 → 2023) was 5.3 GW.
+
+2. **The decline is concentrated in industrial activity, not residential.**
+   Three independent decompositions confirm this:
+   - Weekly: the weekday-Sunday gap shrunk from 12.4 GW (2019) to
+     10.3 GW (2025), a 2.1 GW reduction in the "industrial signal."
+   - Algebraically: weekday consumption fell 4.2 GW (60.3 → 56.1 GW);
+     Sunday consumption fell only 2.1 GW (47.9 → 45.8 GW).
+   - Hourly: the decline at hour 14 is 5,700 MW vs only 2,200 MW
+     at hour 2 — a 2.6× difference matching the industrial activity
+     profile.
+
+3. **Winter peak vs summer trough is ~10 GW.** Jan/Feb average 60.3 GW;
+   Aug averages 50.5 GW. December is *lower* than November (56.8 vs
+   58.2 GW) due to Christmas/New Year industrial slowdown — the
+   highest-stress periods for the grid are early January and February,
+   not Christmas week.
+
+4. **The weekly industrial signal is ~11.1 GW** (Wed peak 58.3 GW vs
+   Sun trough 46.4 GW). Saturday (49.5 GW) sits between weekdays and
+   Sunday, indicating substantial Saturday-shift activity in German
+   manufacturing. Mon-Fri shows a clear sub-structure: Monday "warm-up"
+   (~1.8 GW below Wed), Tue/Wed/Thu uniform peak operations, Friday
+   "wind-down" (~1.4 GW below Wed).
+
+5. **The diurnal peak is in the morning, not the evening.** Hour 11
+   averages 62.4 GW, hour 18 only 60.3 GW. This morning-peak signature
+   is characteristic of industrial-heavy load profiles, opposite to
+   residential-heavy grids where the evening peak dominates. Daily
+   peak-to-trough range is 18.7 GW (62.4 at 11h vs 43.7 at 3h); morning
+   ramp from 05:00 to 11:00 averages 2.6 GW/hour for six consecutive
+   hours.
+
+6. **A structural "morning supply gap" exists between 05:00 and 12:00.**
+   Consumption is already at 91% of its daily peak by 09:00, but solar
+   production averages less than 4 GW at that hour even in summer, and
+   wind is at its daily minimum (from notebook 02). This 6-hour window
+   is when Germany most depends on conventional generation and imports.
+
+7. **Consumption response to temperature is near-symmetric and V-shaped.**
+   Heating elasticity below 15°C is -461 MW/°C; cooling elasticity above
+   18°C is +453 MW/°C. The cooling sensitivity is essentially identical
+   to heating despite Germany's historically low AC penetration —
+   reflecting recent growth in residential AC adoption, data centre
+   cooling, and industrial process cooling following multiple heat
+   waves (2018, 2022, 2023). Total heating impact remains larger only
+   because Germany's temperature range extends further below the
+   comfort zone than above it.
+
+8. **Residual load variability has grown 56% even as its mean has
+   shrunk 22%.** Mean residual load fell from 37.8 GW (2019) to
+   29.6 GW (2025) as renewables displaced conventional generation. Over
+   the same window, standard deviation rose from 12.3 GW to 15.0 GW,
+   and the coefficient of variation went from 32.5% to 50.9% — a 56%
+   increase in relative volatility. This is the structural mechanism
+   behind growing European price volatility: renewable variability
+   propagates directly into residual load and prices.
+
+### Implications for downstream phases
+
+- **Phase 4 (ML):** The price model's training window restriction
+  to post-2023-04-16 (established in notebook 01) is reinforced —
+  residual load variability stepped up around the same time.
+  Hour-of-day, day-of-week, and temperature should all be features.
+  The temperature relationship contains hour/season confounding that
+  interaction terms can disentangle.
+
+- **Phase 6 (dashboard):** Three dashboard-ready charts:
+  - Day-of-week × hour-of-day consumption heatmap (Historical Overview)
+  - Annual mean and std of residual load (Market Monitor — the
+    volatility story is the single most important operational metric)
+  - Temperature V-curve (Historical Overview, optional)
+  
+  Recommended framing for current-conditions displays: "current value
+  vs typical for this hour, day, and temperature" rather than
+  "current value vs daily average."
+
+- **Cross-cutting:** Notebook 03 connects directly to notebook 01's
+  net-import finding. The morning supply gap (05:00-12:00) is when
+  imports are most needed; the growing residual load volatility means
+  the import need itself is highly variable. This makes neighbour-price
+  spread analysis (notebook 05) the most important downstream work.
