@@ -347,3 +347,92 @@ and post-nuclear phase-out.
   
   Recommended live framing: "current price vs typical for this hour,
   season, and solar/wind forecast" — not vs daily average.
+
+## Notebook 05 — Neighbour price spreads
+
+### Headline findings
+
+1. **All zones co-move with DE/LU but with three distinct coupling strengths.**
+   Tightly coupled (r > 0.90): Netherlands (0.956), Czechia (0.920),
+   Austria (0.919), Denmark-1 (0.915), Denmark-2 (0.886) — these track
+   DE/LU closely through European market coupling. Loosely coupled
+   (r < 0.80): Switzerland (0.765), France (0.732), Poland (0.679) —
+   these have independent supply structures (Alpine hydro, French nuclear,
+   Polish coal-dominated mix) that create persistent divergence from
+   DE/LU dynamics.
+
+2. **Germany's price position is geographically split.** DE/LU is
+   structurally cheaper than the east (Poland, +€29/MWh average spread)
+   and west (France, +€19/MWh) but more expensive than the Alpine zones
+   (Austria −€5.50, Switzerland −€5.23, Czechia −€6.07 EUR/MWh). German
+   daytime solar surplus drives the east/west cheapness; Alpine hydro
+   scarcity premium drives the south-east expense.
+
+3. **The seasonal spread pattern has two opposing directions depending**
+   **on the neighbour's supply mix.** Alpine zones (Austria, Switzerland,
+   Czechia) show the largest seasonal swings — Switzerland's €23 swing
+   is the largest in the dataset (winter -€15.6, summer +€7.8). DE/LU
+   is much cheaper than these zones in winter because Alpine hydro
+   storage retains value for winter scarcity, pushing Alpine winter
+   prices above German baseload. The relationship *reverses in summer*
+   when snowmelt floods Alpine markets with cheap hydro while German
+   afternoon prices remain moderate. Western/Eastern zones (Poland,
+   France) show DE/LU more expensive across all seasons, with the
+   biggest gaps in shoulder seasons (Poland +€39 in autumn, France
+   +€25 in spring). Denmark zones and Netherlands show minimal
+   seasonal variation (swings under €7) due to wind coupling and
+   market coupling respectively. The intra-day midday-trough
+   structure (solar surplus, see Section 6) is preserved within
+   each season — these are seasonal *mean* spreads, not contradictions
+   of the diurnal pattern.
+
+4. **Switzerland and France carry the most predictive spread information
+   for next-hour DE/LU prices** (lead-1h correlation 0.538 and 0.501
+   respectively). Switzerland's pumped-hydro storage acts as a
+   forward-looking price-discovery mechanism for Alpine and Mediterranean
+   scarcity; France's nuclear-dominated supply provides an independent
+   signal that German residual load doesn't capture. Poland is a
+   secondary signal (0.382), useful for scarcity-hour prediction. **The
+   Denmark spreads are weak predictors** (0.20–0.23) despite their high
+   level-correlation — both Denmark zones are wind-dependent like
+   Germany, so the spread cancels the shared signal and leaves mostly
+   noise.
+
+5. **The 2022 crisis shows in spread space too.** All zones spiked
+   together during the gas crisis, confirming it was a pan-European
+   shock with no meaningful arbitrage path between zones. Post-nuclear,
+   spreads re-emerged with greater variance — Germany's structural
+   import dependency means the DE-neighbour spread is no longer
+   anchored by German baseload, making it a more informative feature
+   than before 2023.
+
+### Implications for downstream phases
+
+- **Phase 4 (ML — price spread features):** Recommended primary spread
+  features for the day-ahead price model are **Switzerland** and
+  **France** — they carry the highest lead-1h correlation (0.538, 0.501)
+  and represent independent supply structures (Alpine storage, French
+  nuclear). **Poland** is a useful secondary feature for scarcity-hour
+  prediction (0.382). **Denmark-1, Denmark-2** should not be included
+  as spread features despite high level correlation — their spread vs
+  DE/LU is dominated by noise because both markets are wind-coupled.
+  Austria, Czechia, Netherlands spreads add modest information but are
+  largely collinear with the residual load feature from notebook 04.
+
+- **Phase 6 (dashboard):** The spread heatmap (DE/LU vs Poland, season
+  × hour) belongs on the Market Monitor page as the context indicator
+  for import/export pressure — Poland has the highest spread volatility
+  and the clearest seasonal pattern. A live "current DE/LU vs neighbours"
+  widget showing the four most-informative spreads (CH, FR, PL, NL) is
+  the most actionable signal for Zephyrwerk's trading decisions: it
+  directly indicates whether the German market is in surplus
+  (negative spreads) or deficit (positive spreads) relative to the
+  European average.
+
+- **Cross-cutting:** The import-dependency story (notebook 01) and the
+  spread analysis here converge on the same operational insight: Germany
+  cannot be modelled as a closed system. Neighbour-zone prices are part
+  of the causal structure of the DE/LU price — not merely correlated
+  covariates — and their independent supply signals (hydro, nuclear,
+  coal) deserve dedicated features in the Phase 4 model rather than
+  being collapsed into a single "European price" aggregate.
