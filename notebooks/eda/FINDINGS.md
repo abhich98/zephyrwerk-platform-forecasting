@@ -267,3 +267,83 @@ Open-Meteo series.
   imports are most needed; the growing residual load volatility means
   the import need itself is highly variable. This makes neighbour-price
   spread analysis (notebook 05) the most important downstream work.
+
+## Notebook 04 - Price Dynamics (04_price_dynamics)
+
+Seven-year analysis of DE/LU day-ahead prices (2019–2025), tracing price
+dynamics through three structural regimes: pre-crisis, 2022 gas crisis,
+and post-nuclear phase-out.
+
+### Headline findings
+
+1. **Three structurally distinct price regimes exist in the data.**
+   Pre-crisis (n=27,600 hours): mean €59, median €42 EUR/MWh, range-bound
+   with rare spikes (std €58). Crisis (n=9,984 hours, Feb 2022–Apr 2023):
+   mean €216, median €183, std €142, with 5% of hours exceeding €500
+   and a peak of €871. Post-nuclear (n=23,784 hours, Apr 2023 onward):
+   mean €85, median €88, std €51 — structurally lower mean than crisis
+   but extreme spikes still occur (max €936) and extreme negatives are
+   now common (min −€500). Training on all three regimes would teach
+   a price distribution that no longer exists.
+
+2. **Negative prices have grown from a rarity to a structural feature.**
+   Hours with negative DE/LU price rose from 1.6% (2021) to 6.5% (2025),
+   with the strongest acceleration post-2022. Negative-price hours are
+   concentrated in spring and summer midday hours when solar output
+   peaks relative to demand — directly visible as the renewable-surplus
+   signal from notebook 03's residual load analysis expressed in price.
+
+3. **Negative prices nearly disappeared during the 2022 crisis** (only
+   70 hours, 0.8% — less than half of 2021's incidence). When gas became
+   extremely expensive, the marginal cost floor rose so high that even
+   renewable surplus hours cleared at positive prices. This is the
+   textbook illustration of merit-order pricing visible in real data:
+   negative prices require both renewable surplus *and* low conventional
+   marginal cost.
+
+4. **Residual load is the primary price driver in the post-nuclear
+   regime, with Pearson r = 0.831.** The empirical supply curve shows
+   three distinct zones: negative prices at residual load below ~15 GW
+   (renewable surplus), competitive pricing at 15–40 GW (gas/coal
+   marginal), and steep scarcity pricing above ~40 GW. This kink
+   structure is what makes residual load the single most important
+   feature for any price forecasting model.
+
+5. **The duck curve is now visible in German day-ahead prices.** Summer
+   diurnal median prices follow the solar generation profile in reverse:
+   midday trough at 12–14h (near-zero or negative) with evening recovery
+   at 17–20h. Winter shows the morning peak structure from notebook 03:
+   high consumption + low solar + low wind = high residual load = high
+   prices at 09–11h.
+
+6. **Price volatility has doubled relative to pre-crisis levels.**
+   Annual std dev was ~20–30 EUR/MWh in 2019–2021, peaked near 140
+   in 2022, and stabilized at ~50 in 2024–2025. The post-nuclear era is
+   not a return to pre-crisis stability — it is a new regime with
+   persistently elevated volatility driven by residual load variability.
+
+7. **The 2022 crisis mechanism:** Gas became the marginal generator for
+   most hours, and gas spot prices rose ~10× post-Russia invasion.
+   Under merit-order pricing this set the clearing price directly.
+   The return to lower prices in 2023 coincided with nuclear phase-out,
+   which reduced thermal baseload requirements and increased the
+   fraction of hours where renewables set the price.
+
+### Implications for downstream phases
+
+- **Phase 4 (ML):** Training window must be post-2023-04-16 only —
+  the three regimes are structurally non-overlapping. Model features
+  should include: residual load forecast, hour-of-day × season
+  interaction, solar generation forecast, wind generation forecast,
+  and temperature. Residual load alone (r=0.831) explains the
+  first-order signal; neighbour-zone spread features (notebook 05)
+  will capture the second-order import dynamic.
+
+- **Phase 6 (dashboard):** Four dashboard-ready charts:
+  - Full price timeline with regime annotations (Historical Overview)
+  - Negative-price frequency by year (Market Monitor)
+  - Empirical supply curve: residual load vs median price (Market Monitor)
+  - Diurnal price heatmap or line chart by season (Market Monitor)
+  
+  Recommended live framing: "current price vs typical for this hour,
+  season, and solar/wind forecast" — not vs daily average.
