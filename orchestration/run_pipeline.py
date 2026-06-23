@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from ingestion.s3_uploader import DATA_NAMES, is_already_uploaded, upload_to_s3
 from ingestion.smard_client import fetch_range
 from ingestion.weather_client import fetch_weather
+from ingestion.loader import load_range
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -91,6 +92,9 @@ def run_pipeline(start_date: datetime, end_date: datetime):
         except Exception as e:
             logger.error(f"Data for {current_day.strftime('%Y-%m-%d')} cannot fetched: {e}")
         current_day += timedelta(days=1)
+
+    # Load raw data from S3 into PostgreSQL
+    load_range(start_date, end_date)
 
 if __name__ == "__main__":
     args = parser()
