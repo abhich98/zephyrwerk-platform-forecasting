@@ -43,6 +43,7 @@ dev = [
     "jupyterlab>=4.5",
     "matplotlib>=3.9",
     "seaborn>=0.13",
+    "dbt-postgres",
 ]
 
 [build-system]

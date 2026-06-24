@@ -1,0 +1,12 @@
+zephyrwerk:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('ZEPHYRWERK_RDS_HOST') }}"
+      port: "{{ env_var('ZEPHYRWERK_RDS_PORT') | int }}"
+      user: "{{ env_var('ZEPHYRWERK_RDS_USER') }}"
+      password: "{{ env_var('ZEPHYRWERK_RDS_PASSWORD') }}"
+      dbname: "{{ env_var('ZEPHYRWERK_RDS_DB') }}"
+      schema: ""
+      threads: 4

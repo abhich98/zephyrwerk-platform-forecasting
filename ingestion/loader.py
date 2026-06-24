@@ -176,4 +176,7 @@ def load_range(start_date: datetime, end_date: datetime) -> None:
         conn.close()
 
 if __name__ == "__main__":
-    load_range(datetime(2019, 1, 1), datetime(2019, 1, 3))
+    end = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    load_range(datetime(2019, 1, 1), end)
+    print('End date used:', end.date())
+    
