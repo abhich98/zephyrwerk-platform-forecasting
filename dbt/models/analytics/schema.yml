@@ -1,0 +1,86 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: "Date dimension table covering 2019-01-01 to 2030-12-31. Includes season, weekend flag, and German public holiday flag."
+    columns:
+      - name: date_day
+        description: "The date. Primary key."
+        tests:
+          - not_null
+          - unique
+
+      - name: year
+        description: "Calendar year."
+        tests:
+          - not_null
+
+      - name: quarter
+        description: "Calendar quarter (1-4)."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4]
+
+      - name: month
+        description: "Calendar month 1-12."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+      - name: week_of_year
+        description: "ISO week number (1-53)."
+        tests:
+          - not_null
+
+      - name: day_of_week
+        description: "Day of week. 0=Monday, 6=Sunday."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3, 4, 5, 6]
+
+      - name: is_weekend
+        description: "True if Saturday or Sunday."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [True, False]
+              config:
+                quote: false
+
+      - name: season
+        description: "Meteorological season."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['winter', 'spring', 'summer', 'autumn']
+
+      - name: is_german_public_holiday
+        description: "True if nationwide German public holiday."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [True, False]
+              config:
+                quote: false
+
+      - name: holiday_name
+        description: "German name of the public holiday, null on non-holiday days."
+
+      - name: is_workday
+        description: "True if not a weekend and not a German public holiday."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [True, False]
+              config:
+                quote: false
