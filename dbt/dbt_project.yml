@@ -12,6 +12,9 @@ macro-paths: ["macros"]
 target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
+vars:
+  nuclear_retirement_date: '2024-02-04 22:00:00+00'
+
 models:
   zephyrwerk:
     staging:

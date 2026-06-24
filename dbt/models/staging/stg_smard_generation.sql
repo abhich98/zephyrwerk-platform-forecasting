@@ -4,9 +4,11 @@ SELECT
     COALESCE(value, 0) AS value,
     unit
 FROM
-    raw.smard_generation
+    {{ source('raw', 'smard_generation') }}
 WHERE
-    signal = 'NUCLEAR' AND timestamp <= '2024-02-04 22:00:00+00' AND value >= 0
+    signal = 'NUCLEAR'
+    AND timestamp <= '{{ var("nuclear_retirement_date") }}'::TIMESTAMP WITH TIME ZONE
+    AND (value >= 0 OR value IS NULL)
 
 UNION ALL
 
@@ -16,6 +18,6 @@ SELECT
     value,
     unit
 FROM
-    raw.smard_generation
+    {{ source('raw', 'smard_generation') }}
 WHERE
     signal != 'NUCLEAR' AND value >= 0
