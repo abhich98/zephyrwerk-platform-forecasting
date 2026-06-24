@@ -5,4 +5,4 @@ SELECT
     value,
     unit
 FROM
-    raw.weather
+    {{ source('raw', 'weather') }}

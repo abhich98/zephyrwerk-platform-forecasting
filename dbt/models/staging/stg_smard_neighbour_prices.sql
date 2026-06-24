@@ -4,4 +4,4 @@ SELECT
     value,
     unit
 FROM
-    raw.smard_neighbour_prices
+    {{ source('raw', 'smard_neighbour_prices') }}
