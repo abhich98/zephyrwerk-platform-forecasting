@@ -1,6 +1,6 @@
 # Zephyrwerk Energy Analytics Platform
 
-Production-grade data engineering platform ingesting live German electricity market data (SMARD / Bundesnetzagentur), transforming it with dbt, serving ML-powered predictions via a FastAPI REST API, and visualising results in a Streamlit dashboard — deployed on AWS.
+Production-grade data engineering platform ingesting live German electricity market data (SMARD / Bundesnetzagentur), loading it into PostgreSQL, transforming it with dbt, serving ML-powered predictions via a FastAPI REST API, and visualising results in a Streamlit dashboard — deployed on AWS.
 
 Built as a portfolio project demonstrating end-to-end data platform engineering: from raw API ingestion to ML inference to cloud deployment.
 
@@ -29,21 +29,37 @@ Built as a portfolio project demonstrating end-to-end data platform engineering:
 │  s3://zephyrwerk-data-lake/raw/smard/year=YYYY/month=MM/        │
 │  s3://zephyrwerk-data-lake/raw/weather/year=YYYY/month=MM/      │
 └─────────────────────────────┬───────────────────────────────────┘
-                              │ dbt Core (ECS Task)
+                              │ ingestion/loader.py
+                              │ (Parquet → UPSERT into Postgres)
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│              AWS RDS PostgreSQL — ANALYTICS LAYER               │
-│  schema: staging   → stg_smard_generation, stg_smard_prices ... │
-│  schema: analytics → fct_energy_generation, fct_market_prices   │
-│                       fct_price_spreads, fct_ml_features ...    │
+│           AWS RDS PostgreSQL — raw schema                       │
+│  smard_generation, smard_prices,                                │
+│  smard_neighbour_prices, weather                                │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ dbt Core — staging models (views)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│           AWS RDS PostgreSQL — staging schema                   │
+│  stg_smard_generation, stg_smard_prices,                        │
+│  stg_smard_neighbour_prices, stg_weather                        │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ dbt Core — analytics models (tables)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│           AWS RDS PostgreSQL — analytics schema                 │
+│  dim_date                                                       │
+│  fct_energy_generation       fct_market_prices                  │
+│  fct_price_spreads           fct_weather_features               │
+│  fct_ml_features  ← master 67-column feature table              │
 └──────────────┬──────────────────────────┬───────────────────────┘
                │                          │
                ▼                          ▼
 ┌──────────────────────┐     ┌────────────────────────────────────┐
-│     ML MODELS        │     │     FastAPI — AWS ECS Fargate       │
+│     ML MODELS        │     │     FastAPI — AWS ECS Fargate      │
 │  XGBoost price +     │     │  GET  /energy/generation           │
 │  generation forecast │     │  GET  /energy/prices               │
-│  stored in S3        │     │  GET  /energy/summary              │
+│  s3://.../models/    │     │  GET  /energy/summary              │
 └──────────────────────┘     │  POST /predict/price               │
                              │  POST /predict/generation          │
                              └──────────────────┬─────────────────┘
@@ -60,6 +76,8 @@ Orchestration: EventBridge → Step Functions → ECS Tasks (daily 06:00 UTC)
 Monitoring:    AWS CloudWatch (logs + cost alerts)
 ```
 
+**Three-schema design.** `loader.py` is the bridge between the S3 data lake and PostgreSQL — dbt does not read from S3 directly. The `raw` schema mirrors S3 Parquet and is fully reloadable. `staging` is dbt views (no storage cost, always fresh). `analytics` is dbt tables (pre-computed for query performance). All five fact tables are at hourly grain with identical row counts (65,208 hours over the 2019–2026 window).
+
 ---
 
 ## Phases
@@ -67,8 +85,8 @@ Monitoring:    AWS CloudWatch (logs + cost alerts)
 | Phase | Scope | Status |
 |---|---|---|
 | 1 — Ingestion | SMARD + Open-Meteo clients, S3 raw layer, LocalStack | ✅ Complete · `v0.1.0` |
-| 2 — EDA | Jupyter notebooks, energy mix analysis, findings | ✅ Complete |
-| 3 — dbt | Staging + analytics models, dbt tests, first Dockerfile | 🔜 Not started |
+| 2 — EDA | Jupyter notebooks, energy mix analysis, findings | ✅ Complete · `v0.2.0` |
+| 3 — dbt | Loader, raw/staging/analytics schemas, dbt tests, Dockerfiles | ✅ Complete · `v0.3.0` |
 | 4 — ML | XGBoost price + generation forecasting, model registry | 🔜 Not started |
 | 5 — API | FastAPI service, all endpoints, pytest suite | 🔜 Not started |
 | 6 — Dashboard | Streamlit multipage dashboard, Docker Compose | 🔜 Not started |
@@ -114,8 +132,8 @@ Seven years of German electricity data (2019–2025, ~2.6M hourly rows) across 2
 
 ### Prerequisites
 
-- Python ≥ 3.11 managed via [`uv`](https://docs.astral.sh/uv/)
-- Docker (for LocalStack S3 emulation)
+- **Python 3.12** managed via [`uv`](https://docs.astral.sh/uv/) — pinned to 3.12 because `dbt-core`'s `mashumaro` dependency fails on 3.14
+- **Docker** — runs LocalStack (S3 emulator) and PostgreSQL locally
 
 ### Install
 
@@ -123,6 +141,7 @@ Seven years of German electricity data (2019–2025, ~2.6M hourly rows) across 2
 git clone https://github.com/hasanerdin/zephyrwerk-platform.git
 cd zephyrwerk-platform
 
+uv venv --python 3.12
 uv sync --extra dev
 ```
 
@@ -140,21 +159,56 @@ Key variables:
 | `AWS_ENDPOINT_URL` | `http://localhost:4566` | Points boto3 at LocalStack; leave empty in production |
 | `ZEPHYRWERK_AWS_BUCKET_NAME` | `zephyrwerk-data-lake` | S3 bucket |
 | `ZEPHYRWERK_RDS_HOST` | `localhost` | PostgreSQL host |
+| `ZEPHYRWERK_RDS_PORT` | `5432` | PostgreSQL port |
+| `ZEPHYRWERK_RDS_DB` | `zephyrwerk` | Database name |
+
+### Start local infrastructure
+
+```bash
+# LocalStack — S3 emulation
+docker run -d -p 4566:4566 --name zephyrwerk-localstack localstack/localstack
+
+# PostgreSQL — mounts db/init.sql which creates raw, staging,
+# analytics schemas and all four raw tables on first start
+docker run -d \
+  --name zephyrwerk-postgres \
+  -p 5432:5432 \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=zephyrwerk \
+  -v "$(pwd)/db/init.sql:/docker-entrypoint-initdb.d/init.sql" \
+  postgres:16
+```
 
 ### Run the ingestion pipeline
 
-```bash
-# Start LocalStack (S3 emulation)
-docker run -d -p 4566:4566 localstack/localstack
+`orchestration/run_pipeline.py` runs ingestion (`smard_client` + `weather_client` → Parquet → S3) followed by `loader.py` (Parquet → Postgres `raw` schema). dbt is run separately — see next step.
 
-# Historical backfill (one-time, from post-nuclear regime)
-python orchestration/run_pipeline.py --start_date 2023-04-16 --end_date 2025-12-31
+```bash
+# Historical backfill (one-time, full window)
+python orchestration/run_pipeline.py --start_date 2019-01-01 --end_date 2025-12-31
 
 # Daily incremental run (yesterday only — omit dates for default)
 python orchestration/run_pipeline.py
 ```
 
-The pipeline is idempotent: re-running a date range skips files already present in S3.
+The pipeline is idempotent: re-running a date range skips Parquet files already in S3, and the loader UPSERTs into Postgres on `(timestamp, signal)` so SMARD value revisions are picked up correctly.
+
+### Run dbt transformations
+
+```bash
+cd dbt
+
+# One-time setup
+dbt deps                          # installs dbt_utils
+dbt seed --profiles-dir .         # loads German public holidays CSV
+
+# Build and test
+dbt run  --profiles-dir .         # builds staging views + analytics tables
+dbt test --profiles-dir .         # runs schema tests + singular tests
+```
+
+> `dbt` is deliberately **not** wired into `run_pipeline.py`. In production (Phase 7) ingestion, loader, and dbt run as separate ECS tasks orchestrated by Step Functions — keeping them separate locally preserves architectural honesty.
 
 ### Run EDA notebooks
 
