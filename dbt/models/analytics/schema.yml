@@ -22,6 +22,7 @@ models:
           - accepted_values:
               arguments:
                 values: [1, 2, 3, 4]
+                quote: false
 
       - name: month
         description: "Calendar month 1-12."
@@ -30,6 +31,7 @@ models:
           - accepted_values:
               arguments:
                 values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+                quote: false
 
       - name: week_of_year
         description: "ISO week number (1-53)."
@@ -43,6 +45,7 @@ models:
           - accepted_values:
               arguments:
                 values: [0, 1, 2, 3, 4, 5, 6]
+                quote: false
 
       - name: is_weekend
         description: "True if Saturday or Sunday."
@@ -51,7 +54,6 @@ models:
           - accepted_values:
               arguments:
                 values: [True, False]
-              config:
                 quote: false
 
       - name: season
@@ -69,7 +71,6 @@ models:
           - accepted_values:
               arguments:
                 values: [True, False]
-              config:
                 quote: false
 
       - name: holiday_name
@@ -82,5 +83,57 @@ models:
           - accepted_values:
               arguments:
                 values: [True, False]
-              config:
                 quote: false
+  
+  - name: fct_energy_generation
+    description: "Pivoted fact table of German electricity generation and consumption by 15-minute interval, sourced from SMARD. One row per timestamp."
+    
+    columns:
+      - name: timestamp
+        description: "Start of the 15-minute interval (UTC). Primary key."
+        tests:
+          - not_null
+          - unique
+
+      - name: wind_onshore_mw
+        description: "Onshore wind generation in MW. Null when no data is reported for the interval."
+
+      - name: wind_offshore_mw
+        description: "Offshore wind generation in MW. Null when no data is reported for the interval."
+
+      - name: solar_mw
+        description: "Solar (photovoltaic) generation in MW. Null when no data is reported for the interval."
+
+      - name: biomass_mw
+        description: "Biomass generation in MW. Null when no data is reported for the interval."
+
+      - name: hydropower_mw
+        description: "Run-of-river hydropower generation in MW. Null when no data is reported for the interval."
+
+      - name: pumped_storage_mw
+        description: "Pumped-storage hydro net generation in MW (negative values indicate net pumping). Null when no data is reported."
+
+      - name: natural_gas_mw
+        description: "Natural gas generation in MW. Null when no data is reported for the interval."
+
+      - name: hard_coal_mw
+        description: "Hard coal generation in MW. Null when no data is reported for the interval."
+
+      - name: brown_coal_mw
+        description: "Brown coal (lignite) generation in MW. Null when no data is reported for the interval."
+
+      - name: nuclear_mw
+        description: "Nuclear generation in MW. Zero after April 2023 German nuclear phase-out. Null when no data is reported."
+
+      - name: other_conventional_mw
+        description: "Other conventional (non-renewable) generation in MW. Null when no data is reported for the interval."
+
+      - name: other_renewable_mw
+        description: "Other renewable generation in MW (e.g. geothermal, landfill gas). Null when no data is reported."
+
+      - name: total_consumption_mw
+        description: "Total electricity consumption in MW. Null when no data is reported for the interval."
+
+      - name: residual_load_mw
+        description: "Residual load in MW (total consumption minus variable renewables). Null when no data is reported."
+
