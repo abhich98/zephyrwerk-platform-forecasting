@@ -90,7 +90,7 @@ models:
     
     columns:
       - name: timestamp
-        description: "Start of the 15-minute interval (UTC). Primary key."
+        description: "Start of the hourly interval (UTC). Primary key."
         tests:
           - not_null
           - unique
@@ -137,3 +137,31 @@ models:
       - name: residual_load_mw
         description: "Residual load in MW (total consumption minus variable renewables). Null when no data is reported."
 
+  - name: fct_market_prices
+    description: "Hourly German day-ahead electricity spot prices (EUR/MWh) from SMARD, enriched with rolling averages and lagged price features for time-series analysis."
+
+    columns:
+      - name: timestamp
+        description: "Start of the hourly interval (UTC). Primary key."
+        tests:
+          - not_null
+          - unique
+
+      - name: price_eur_mwh
+        description: "Day-ahead spot price in EUR/MWh for the given hour."
+        tests:
+          - not_null
+
+      - name: price_7d_rolling_avg
+        description: "Rolling average of price_eur_mwh over the trailing 168 hours (7 days), inclusive of the current row."
+        tests:
+          - not_null
+
+      - name: price_24h_lag
+        description: "price_eur_mwh from exactly 24 hours prior. Null for the first 24 rows."
+
+      - name: price_48h_lag
+        description: "price_eur_mwh from exactly 48 hours prior. Null for the first 48 rows."
+
+      - name: price_168h_lag
+        description: "price_eur_mwh from exactly 168 hours (7 days) prior. Null for the first 168 rows."
