@@ -200,8 +200,33 @@ models:
           - not_null
 
       - name: spread_eur_mwh
-        description: "Price spread in EUR/MWh (de_lu_price - neighbour_price). 
-                      Positive values mean the DE_LU is more expensive than neighbour, 
+        description: "Price spread in EUR/MWh (de_lu_price - neighbour_price).
+                      Positive values mean the DE_LU is more expensive than neighbour,
                       indicating a German import incentive."
         tests:
           - not_null
+
+  - name: fct_weather_features
+    description: "Pivoted fact table of hourly weather signals at 100 m hub height and surface level, sourced from stg_weather. One row per timestamp."
+
+    columns:
+      - name: timestamp
+        description: "Start of the hourly interval (UTC). Primary key."
+        tests:
+          - not_null
+          - unique
+
+      - name: wind_speed_100m
+        description: "Wind speed at 100 m hub height in m/s. Null when no data is reported for the interval."
+
+      - name: wind_direction_100m
+        description: "Wind direction at 100 m hub height in degrees (0-360). Null when no data is reported for the interval."
+
+      - name: shortwave_radiation
+        description: "Downward shortwave solar radiation at the surface in W/m². Null when no data is reported for the interval."
+
+      - name: cloud_cover
+        description: "Total cloud cover as a percentage (0-100). Null when no data is reported for the interval."
+
+      - name: temperature_2m
+        description: "Air temperature at 2 m above ground in °C. Null when no data is reported for the interval."

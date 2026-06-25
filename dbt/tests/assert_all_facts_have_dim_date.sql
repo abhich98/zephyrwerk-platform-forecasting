@@ -13,3 +13,9 @@ UNION ALL
 SELECT 'fct_price_spreads' AS fact_table, timestamp
 FROM {{ ref('fct_price_spreads') }}
 WHERE timestamp::date NOT IN (SELECT date_day FROM {{ ref('dim_date') }})
+
+UNION ALL
+
+SELECT 'fct_weather_features' AS fact_table, timestamp
+FROM {{ ref('fct_weather_features') }}
+WHERE timestamp::date NOT IN (SELECT date_day FROM {{ ref('dim_date') }})
