@@ -1,0 +1,167 @@
+version: 2
+
+sources:
+  - name: raw
+    tables:
+      - name: smard_generation
+      - name: smard_prices
+      - name: smard_neighbour_prices
+      - name: weather
+
+models:
+  - name: stg_smard_generation
+    description: "Cleaned generation signals from raw SMARD data.
+                NUCLEAR signal is coalesced to 0 for the end wind-down period
+                and excluded after retirement (2024-02-04 22:00 UTC)"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - signal_name
+    columns:
+      - name: timestamp
+        description: "UTC timestamp of the hourly observation."
+        tests:
+          - not_null
+
+      - name: signal_name
+        description: "Name of the generation signal e.g. WIND_ONSHORE, SOLAR, NUCLEAR."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['WIND_ONSHORE', 'WIND_OFFSHORE', 'SOLAR', 'BIOMASS', 'HYDROPOWER', 'PUMPED_STORAGE',
+                        'NATURAL_GAS', 'HARD_COAL', 'BROWN_COAL', 'NUCLEAR', 'OTHER_CONVENTIONAL', 'OTHER_RENEWABLE',
+                        'TOTAL_CONSUMPTION', 'RESIDUAL_LOAD']
+
+      - name: value
+        description: "Generation output in MW. Always >= 0."
+        tests:
+          - not_null
+
+      - name: unit
+        description: "Unit of measurement. Always MW for generation signals."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['MW']
+
+  - name: stg_smard_prices
+    description: "Cleaned prices of Deutschland and Luxemburg from raw SMARD data."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - signal_name
+
+    columns:
+      - name: timestamp
+        description: "UTC timestamp of the hourly observation."
+        tests:
+          - not_null
+          - unique
+
+      - name: signal_name
+        description: "Name of the price signal. Always 'DE_LU'."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['DE_LU']
+
+      - name: value
+        description: "Price in EUR/MWh. Can be negative."
+        tests:
+          - not_null
+
+      - name: unit
+        description: "Unit of measurement. Always EUR_MWH for price signals."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['EUR_MWH']
+
+  - name: stg_smard_neighbour_prices
+    description: "Cleaned prices of Deutschland's neighbours from raw SMARD data."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - signal_name
+
+    columns:
+      - name: timestamp
+        description: "UTC timestamp of the hourly observation."
+        tests:
+          - not_null
+
+      - name: signal_name
+        description: "Name of the price signal e.g. 'AUSTRIA', 'FRANCE', 'NETHERLANDS', 'POLAND'."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUSTRIA','FRANCE','NETHERLANDS','POLAND','SWITZERLAND','CZECHIA','DENMARK_1','DENMARK_2']
+
+      - name: value
+        description: "Price in EUR/MWh. Can be negative."
+        tests:
+          - not_null
+
+      - name: unit
+        description: "Unit of measurement. Always EUR_MWH for price signals."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['EUR_MWH']
+
+  - name: stg_weather
+    description: "Cleaned weather information for 4 renewable energy regions."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - region
+              - signal_name
+
+    columns:
+      - name: timestamp
+        description: "UTC timestamp of the hourly observation."
+        tests:
+          - not_null
+
+      - name: region
+        description: "Name of the region from which weather data was collected."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["wind_region_brandenburg","wind_region_schleswig","solar_region_bavaria","solar_region_bawue"]
+
+      - name: signal_name
+        description: "Name of the weather signal e.g. 'wind_speed_100m', 'temperature_2m'."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["wind_speed_100m","wind_direction_100m","shortwave_radiation","cloud_cover","temperature_2m"]
+
+      - name: value
+        description: "Weather measurement (wind speed, direction, temperature, etc.). Can be negative."
+        tests:
+          - not_null
+
+      - name: unit
+        description: "Unit of the weather measurement."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["%","°","°C","km/h","W/m²"]

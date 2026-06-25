@@ -2,7 +2,7 @@
 ### Master Reference Document
 > This document is the single source of truth for the entire project.
 > It must be shared at the start of every phase chat to maintain context.
-> Version: 1.6 | Status: Planning Complete
+> Version: 1.7 | Status: Planning Complete
 
 ---
 
@@ -197,7 +197,7 @@ Both modes write to the same S3 raw layer with the same partitioning. The differ
               ingestion/smard_client.py   ingestion/weather_client.py
                      │                        │
                      └───────────┬────────────┘
-                                 │ raw JSON / CSV
+                                 │ Parquet files
                                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    AWS S3 — RAW LAYER                           │
@@ -206,22 +206,32 @@ Both modes write to the same S3 raw layer with the same partitioning. The differ
 │  s3://zephyrwerk-data-lake/raw/weather/year=YYYY/month=MM/      │
 │                                                                 │
 │  Format: Parquet, partitioned by year/month                     │
-│  Retention: indefinite (source of truth)                        │
+│  Retention: indefinite (immutable source of truth)              │
 └─────────────────────────────┬───────────────────────────────────┘
                               │
-                              │ dbt Core (runs as ECS Task)
+                              │ ingestion/loader.py
+                              │ reads Parquet from S3
+                              │ bulk inserts into PostgreSQL raw schema
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│              AWS RDS PostgreSQL — ANALYTICS LAYER               │
+│              AWS RDS PostgreSQL                                 │
 │                                                                 │
-│  schema: staging                                                │
+│  schema: raw          ← loader.py writes here                   │
+│    smard_generation                                             │
+│    smard_prices                                                 │
+│    smard_neighbour_prices                                       │
+│    weather                                                      │
+│                                                                 │
+│  schema: staging      ← dbt reads raw, writes here              │
 │    stg_smard_generation                                         │
 │    stg_smard_prices                                             │
+│    stg_smard_neighbour_prices                                   │
 │    stg_weather                                                  │
 │                                                                 │
-│  schema: analytics                                              │
+│  schema: analytics    ← dbt reads staging, writes here          │
 │    fct_energy_generation    (hourly generation by source)       │
 │    fct_market_prices        (prices + rolling averages)         │
+│    fct_price_spreads        (DE/LU vs neighbour prices)         │
 │    fct_weather_features     (aligned weather signals)           │
 │    fct_ml_features          (joined feature table for ML)       │
 │    dim_date                 (time dim + holidays + seasons)     │
@@ -269,15 +279,20 @@ MONITORING:   AWS CloudWatch (logs + cost alerts)
 06:00 UTC — EventBridge triggers Step Functions state machine
   │
   ├─► Step 1: ECS Task — ingestion container
-  │     pulls yesterday's SMARD + weather data → writes to S3 raw
+  │     pulls yesterday's SMARD + weather data → writes Parquet to S3 raw
   │
-  ├─► Step 2: ECS Task — dbt container
-  │     runs dbt run + dbt test → writes to RDS PostgreSQL
+  ├─► Step 2: ECS Task — loader container
+  │     reads Parquet from S3 raw → bulk inserts into RDS PostgreSQL raw schema
   │
-  ├─► Step 3: ECS Task — ML training container (weekly only)
-  │     retrains models on fresh data → writes .pkl to S3
+  ├─► Step 3: ECS Task — dbt container
+  │     reads from PostgreSQL raw schema
+  │     runs dbt run + dbt test → writes to PostgreSQL staging + analytics schemas
   │
-  └─► Step 4: CloudWatch logs success/failure → alert on failure
+  ├─► Step 4: ECS Task — ML training container (weekly only)
+  │     reads from PostgreSQL analytics schema (fct_ml_features)
+  │     retrains models → writes .pkl to S3 model registry
+  │
+  └─► Step 5: CloudWatch logs success/failure → alert on failure
 ```
 
 ---
@@ -337,6 +352,7 @@ Resources follow the pattern `zephyrwerk-{resource-type}` with an optional `-{qu
 | ECR Repo (API) | `zephyrwerk-api` | Docker image registry |
 | ECR Repo (Dashboard) | `zephyrwerk-dashboard` | Docker image registry |
 | ECR Repo (Ingestion) | `zephyrwerk-ingestion` | Docker image registry |
+| ECR Repo (Loader) | `zephyrwerk-loader` | Docker image registry |
 | ECR Repo (dbt) | `zephyrwerk-dbt` | Docker image registry |
 | ECR Repo (ML) | `zephyrwerk-ml` | Docker image registry |
 | Step Functions | `zephyrwerk-daily-pipeline` | State machine for daily run |
@@ -381,13 +397,20 @@ s3://zephyrwerk-data-lake/
 ### RDS PostgreSQL Schema Structure
 
 ```sql
--- Schema: staging (dbt staging models)
+-- Schema: raw (loader.py writes here — working copy of S3 raw data)
+smard_generation
+smard_prices
+smard_neighbour_prices
+weather
+-- Note: raw schema is reloadable from S3 at any time if corrupted or schema changes
+
+-- Schema: staging (dbt staging models — read from raw, write here)
 stg_smard_generation
 stg_smard_prices
 stg_smard_neighbour_prices
 stg_weather
 
--- Schema: analytics (dbt mart models)
+-- Schema: analytics (dbt mart models — read from staging, write here)
 fct_energy_generation
 fct_market_prices
 fct_price_spreads
@@ -614,15 +637,17 @@ v1.0.0 — Phase 7 complete: Full AWS cloud deployment
 Deliverables:
 - Project scaffold with folder structure, `pyproject.toml`, `.env` management
 - SMARD ingestion client — supports both backfill (2019-01-01 → present) and incremental (single day) modes via `start_date`/`end_date` params
-- Open-Meteo ingestion client — handles **both** the Historical Weather API (backfill) and Forecast API (daily), weather signals for 4 German regions
+- Open-Meteo ingestion client — handles **both** the Historical Weather API (backfill) and Forecast API (daily), weather signals for 4 asset-aligned locations
 - S3 uploader — writes partitioned Parquet files to raw layer, idempotent for re-runs
-- One-time historical backfill executed and verified in S3
-- Local orchestration script: `orchestration/run_pipeline.py`
+- Loader script (`ingestion/loader.py`) — reads Parquet from S3, bulk inserts into PostgreSQL `raw` schema; reloadable at any time from S3
+- PostgreSQL running locally in Docker — `raw` schema created and populated by loader
+- One-time historical backfill executed and verified in both S3 and PostgreSQL raw schema
+- Local orchestration script: `orchestration/run_pipeline.py` — runs ingestion → loader in sequence (dbt added in Phase 3)
 - LocalStack set up for local S3 emulation
 - GitHub repo initialized, branch created, CI scaffold in place
 - **Verify all SMARD filter IDs against `smard.api.bund.dev` (see note in Section 5)**
 
-New skills: boto3 S3 client, Parquet with pyarrow, LocalStack, environment config patterns, backfill vs. incremental ingestion design
+New skills: boto3 S3 client, Parquet with pyarrow, LocalStack, psycopg2 bulk insert, environment config patterns, backfill vs. incremental ingestion design
 
 ---
 
@@ -644,15 +669,18 @@ New skills: Time-series EDA patterns, energy domain knowledge
 **Branch:** `phase/3-dbt`  
 **Goal:** Clean, tested, documented analytics tables in RDS PostgreSQL.
 
+**What dbt reads:** The `raw` schema in PostgreSQL — populated by `loader.py` in Phase 1. dbt does not read from S3 directly; it only runs SQL against PostgreSQL.
+
 Deliverables:
-- dbt project scaffold with `profiles.yml` using environment variables
-- Staging models for all raw sources
-- Analytics models: `fct_energy_generation`, `fct_market_prices`, `fct_weather_features`, `fct_ml_features`, `dim_date`
+- dbt project scaffold with `profiles.yml` using environment variables (same file works locally and on ECS — only env vars change)
+- Staging models reading from `raw` schema, writing to `staging` schema
+- Analytics models reading from `staging`, writing to `analytics` schema: `fct_energy_generation`, `fct_market_prices`, `fct_price_spreads`, `fct_weather_features`, `fct_ml_features`, `dim_date`
 - dbt tests: not-null, unique, accepted values, freshness checks
 - Column-level documentation on all models
 - dbt Dockerfile for ECS deployment
+- `run_pipeline.py` updated: ingestion → loader → dbt run
 
-New skills: dbt Core project structure, dimensional modeling for time-series, dbt testing patterns
+New skills: dbt Core project structure, dimensional modeling for time-series, dbt testing patterns, dbt profiles env var pattern
 
 ---
 
@@ -839,6 +867,7 @@ Phase 1–2:   No Docker at all
 Phase 3:     Add dbt/Dockerfile only
              → first containerization experience
              → low risk, high production relevance
+             → also add ingestion/Dockerfile (covers both ingestion + loader)
 
 Phase 4:     Add ml/Dockerfile
              → containerize ML training
@@ -894,11 +923,13 @@ zephyrwerk-platform/
 ├── ingestion/
 │   ├── __init__.py
 │   ├── smard_client.py          # SMARD API client
-│   ├── weather_client.py        # Open-Meteo API client
-│   └── s3_uploader.py           # S3 write utilities
+│   ├── weather_client.py        # Open-Meteo API client (historical + forecast)
+│   ├── s3_uploader.py           # writes Parquet to S3 raw layer
+│   ├── loader.py                # reads Parquet from S3, bulk inserts into PostgreSQL raw schema
+│   └── Dockerfile               # covers ingestion + loader (same container)
 │
 ├── orchestration/
-│   └── run_pipeline.py          # Local: runs ingestion → dbt → (optionally ML)
+│   └── run_pipeline.py          # Local: ingestion → loader → dbt run → (optionally ML)
 │
 ├── dbt/
 │   ├── dbt_project.yml
@@ -979,5 +1010,5 @@ zephyrwerk-platform/
 ---
 
 *Document maintained by: Hasan Erdin*  
-*Last updated: May 2026 — v1.6: Changed history start date from 2018 to 2019-01-01 across all references (backfill, S3 paths, EDA, dashboard, ML); documented reason — DE/LU market area only fully active from 01.10.2018, starting 2019 avoids the mixed DE/AT/LU → DE/LU structural break*  
+*Last updated: May 2026 — v1.7: Fixed architectural gap — added loader.py (S3 Parquet → PostgreSQL raw schema) as the missing ELT load step; updated architecture diagram, daily pipeline flow (now 5 steps), ECR repos, RDS schema (now 3 layers: raw/staging/analytics), Phase 1 and Phase 3 deliverables, folder structure, and Docker adoption section accordingly*  
 *Next update: After Phase 1 completion*

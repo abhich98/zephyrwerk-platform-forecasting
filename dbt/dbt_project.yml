@@ -1,0 +1,25 @@
+name: zephyrwerk
+version: '1.0.0'
+config-version: 2
+
+profile: zephyrwerk
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  nuclear_retirement_date: '2024-02-04 22:00:00+00'
+
+models:
+  zephyrwerk:
+    staging:
+      +schema: staging
+      +materialized: view
+    analytics:
+      +schema: analytics
+      +materialized: table
