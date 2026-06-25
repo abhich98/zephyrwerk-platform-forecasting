@@ -165,3 +165,43 @@ models:
 
       - name: price_168h_lag
         description: "price_eur_mwh from exactly 168 hours (7 days) prior. Null for the first 168 rows."
+
+  - name: fct_price_spreads
+    description: "Hourly price spreads between neighbouring country day-ahead electricity prices and the German-Luxembourg (DE_LU) price, one row per timestamp-neighbour pair."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - neighbour
+
+    columns:
+      - name: timestamp
+        description: "Start of the hourly interval (UTC)."
+        tests:
+          - not_null
+
+      - name: neighbour
+        description: "Neighbouring country price signal (e.g. AUSTRIA, FRANCE)."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['AUSTRIA', 'FRANCE', 'NETHERLANDS', 'POLAND', 'SWITZERLAND', 'CZECHIA', 'DENMARK_1', 'DENMARK_2']
+
+      - name: neighbour_price_eur_mwh
+        description: "Day-ahead spot price in EUR/MWh for the neighbouring country."
+        tests:
+          - not_null
+
+      - name: de_lu_price_eur_mwh
+        description: "Day-ahead spot price in EUR/MWh for the Germany-Luxembourg zone (DE_LU)."
+        tests:
+          - not_null
+
+      - name: spread_eur_mwh
+        description: "Price spread in EUR/MWh (de_lu_price - neighbour_price). 
+                      Positive values mean the DE_LU is more expensive than neighbour, 
+                      indicating a German import incentive."
+        tests:
+          - not_null
