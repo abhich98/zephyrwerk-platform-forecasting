@@ -1,5 +1,6 @@
-import holidays
 import csv
+
+import holidays
 
 de_holidays = holidays.Germany(years=range(2019, 2031), subdiv=None)
 

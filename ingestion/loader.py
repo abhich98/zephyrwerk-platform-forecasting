@@ -1,15 +1,15 @@
-import os
 import logging
+import os
+from datetime import datetime, timedelta, timezone
+
 import pandas as pd
 import psycopg2
-from datetime import datetime, timedelta, timezone
+import pyarrow.dataset as ds
 from psycopg2.extras import execute_values
 from pyarrow.fs import S3FileSystem
-import pyarrow.dataset as ds
 
-
-from ingestion.smard_client import ENERGY_SOURCE, CONSUMPTION_TYPE, NEIGHBORING_REGION
 from ingestion.s3_uploader import DATA_NAMES, get_file_name
+from ingestion.smard_client import CONSUMPTION_TYPE, ENERGY_SOURCE, NEIGHBORING_REGION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)

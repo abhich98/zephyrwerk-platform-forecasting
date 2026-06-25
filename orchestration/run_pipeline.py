@@ -19,10 +19,10 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
+from ingestion.loader import load_range
 from ingestion.s3_uploader import DATA_NAMES, is_already_uploaded, upload_to_s3
 from ingestion.smard_client import fetch_range
 from ingestion.weather_client import fetch_weather
-from ingestion.loader import load_range
 
 load_dotenv()  # Load environment variables from .env file
 
