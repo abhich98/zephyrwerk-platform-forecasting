@@ -9,6 +9,7 @@ build/
 
 # Log
 pipeline.log
+logs
 
 # Virtual environments / uv
 .venv/
@@ -27,6 +28,8 @@ venv/
 dbt/target/
 dbt/dbt_packages/
 dbt/logs/
+dbt/dbt.log
+dbt/.user.yml
 
 # ML artifacts — live in S3, not Git
 *.pkl
