@@ -1,0 +1,46 @@
+{
+  "model": "wind_total_mw_forecast",
+  "trained_at": "2026-07-02T08:06:50.559962+00:00",
+  "train_window": {
+    "start": "2019-01-08 00:00:00+00:00",
+    "end": "2026-03-11 23:00:00+00:00"
+  },
+  "test_window": {
+    "start": "2026-03-12 00:00:00+00:00",
+    "end": "2026-06-09 23:00:00+00:00"
+  },
+  "n_train": 62675,
+  "n_test": 2050,
+  "hyperparameters": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 5,
+    "reg_alpha": 0.0,
+    "reg_lambda": 1.0,
+    "random_state": 42,
+    "n_jobs": -1,
+    "tree_method": "hist"
+  },
+  "cv_mae_mean": 2845.266237939065,
+  "cv_mae_std": 219.6707036660185,
+  "cv_mae_per_fold": [
+    2779.915756542595,
+    2584.714858488354,
+    2655.815026715225,
+    3117.643583688695,
+    3088.2419642604536
+  ],
+  "holdout": {
+    "mae": 3121.0575538523603,
+    "rmse": 4206.524995509813,
+    "r2": 0.8186379297655664,
+    "peak_mae": 5150.416747522865
+  },
+  "baseline_persistence": {
+    "mae": 8840.385199999999
+  },
+  "n_features": 61
+}

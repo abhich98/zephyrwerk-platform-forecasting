@@ -1,0 +1,47 @@
+{
+  "model": "price_forecast",
+  "trained_at": "2026-07-02T07:03:56.532282+00:00",
+  "train_window": {
+    "start": "2023-04-16 00:00:00+00:00",
+    "end": "2026-03-11 23:00:00+00:00"
+  },
+  "test_window": {
+    "start": "2026-03-12 00:00:00+00:00",
+    "end": "2026-06-09 23:00:00+00:00"
+  },
+  "n_train": 25262,
+  "n_test": 2050,
+  "hyperparameters": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 5,
+    "reg_alpha": 0.0,
+    "reg_lambda": 1.0,
+    "random_state": 42,
+    "n_jobs": -1,
+    "tree_method": "hist"
+  },
+  "cv_mae_mean": 17.87500431840242,
+  "cv_mae_std": 1.7384272504467044,
+  "cv_mae_per_fold": [
+    18.768029508883817,
+    17.853096271756286,
+    20.59240634960205,
+    15.585939800547857,
+    16.575549661222094
+  ],
+  "holdout": {
+    "mae": 18.42320042081664,
+    "rmse": 26.666224142886815,
+    "directional_accuracy": 0.8370731707317073,
+    "deviation_directional_accuracy": 0.8170731707317073
+  },
+  "baseline_persistence": {
+    "mae": 33.53474634146342,
+    "directional_accuracy": 0.8375609756097561
+  },
+  "n_features": 65
+}
