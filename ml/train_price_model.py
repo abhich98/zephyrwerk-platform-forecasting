@@ -11,6 +11,7 @@ from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 
 from ml.data_access import load_features
 from ml.features.feature_engineering import split_x_y, temporal_split, PriceModelFeatureEngineer
+from ml.s3_model_io import save_pipeline
 
 raw = load_features(start_date="2023-04-09")   # 7-day buffer before 2023-04-16 for lags
 
@@ -119,3 +120,6 @@ report = {
 Path("ml/artifacts").mkdir(exist_ok=True)
 with open("ml/artifacts/price_model_report.json", "w") as f:
     json.dump(report, f, indent=2)
+
+s3_uri = save_pipeline(pipeline, model_name="price_forecast", metadata=report)
+print(f"Model saved to {s3_uri}")

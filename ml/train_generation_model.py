@@ -12,6 +12,7 @@ from sklearn.metrics import r2_score
 
 from ml.data_access import load_features
 from ml.features.feature_engineering import split_x_y, temporal_split, GenerationModelFeatureEngineer
+from ml.s3_model_io import save_pipeline
 
 
 def train_generation_model(
@@ -27,7 +28,8 @@ def train_generation_model(
         target (str): Target variable, either "wind_total_mw" or "solar_mw".
         output_report_name (str): Name of the output JSON report file.
     """
-    if target == "solar_mw":
+    feature_name = target.split("_")[0]  # "wind" or "solar"
+    if feature_name == "solar":
         raw["solar_mw_lag_24h"] = raw["solar_mw"].shift(24)
         raw["solar_mw_lag_168h"] = raw["solar_mw"].shift(168)
 
@@ -104,7 +106,7 @@ def train_generation_model(
     print(f"Model Peak MAE: {peak_mae:.2f} EUR/MWh")
 
     report = {
-        "model": f"{target}_forecast",
+        "model": f"{feature_name}_forecast",
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "train_window": {"start": str(X_trainval.index.min()), "end": str(X_trainval.index.max())},
         "test_window": {"start": str(X_test.index.min()), "end": str(X_test.index.max())},
@@ -138,6 +140,10 @@ def train_generation_model(
     ax.set_title(f"{target} — holdout")
     plt.tight_layout()
     plt.savefig(f"ml/artifacts/{target}_holdout.png", dpi=100)
+
+    # Save the trained model to S3 with metadata
+    s3_uri = save_pipeline(pipeline, model_name=f"{feature_name}_forecast", metadata=report)
+    print(f"Model saved to {s3_uri}")
 
 
 raw = load_features(start_date="2019-01-01")   # generation model uses full history
