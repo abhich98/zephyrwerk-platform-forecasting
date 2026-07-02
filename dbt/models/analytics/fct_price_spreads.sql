@@ -14,7 +14,6 @@ WITH base AS (
 
 SELECT
     timestamp,
-    MAX(de_lu_price_eur_mwh)                                               AS de_lu_price_eur_mwh,
     MAX(neighbour_price_eur_mwh) FILTER (WHERE neighbour = 'AUSTRIA')      AS austria_price_eur_mwh,
     MAX(spread_eur_mwh)          FILTER (WHERE neighbour = 'AUSTRIA')      AS austria_spread_eur_mwh,
     MAX(neighbour_price_eur_mwh) FILTER (WHERE neighbour = 'FRANCE')       AS france_price_eur_mwh,
