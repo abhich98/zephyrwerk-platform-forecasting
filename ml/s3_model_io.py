@@ -19,6 +19,12 @@ def _get_s3_client():
     return _s3_client
 
 
+def _reset_client_cache() -> None:
+    """Drop the cached boto3 client so the next call rebuilds it. Used by tests to isolate mocked backends."""
+    global _s3_client
+    _s3_client = None
+
+
 def _get_bucket_name() -> str:
     bucket = os.environ.get("ZEPHYRWERK_AWS_BUCKET_NAME")
     if bucket is None:

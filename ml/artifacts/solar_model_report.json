@@ -1,6 +1,6 @@
 {
-  "model": "solar_mw_forecast",
-  "trained_at": "2026-07-02T08:07:02.210764+00:00",
+  "model": "solar_forecast",
+  "trained_at": "2026-07-02T09:02:50.042518+00:00",
   "train_window": {
     "start": "2019-01-08 00:00:00+00:00",
     "end": "2026-03-11 23:00:00+00:00"

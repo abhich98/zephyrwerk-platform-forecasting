@@ -1,8 +1,6 @@
 import json
 from pathlib import Path
 from datetime import datetime, timezone
-import pandas as pd
-import numpy as np
 from sklearn.compose import ColumnTransformer, make_column_selector
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
@@ -10,6 +8,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 
 from ml.data_access import load_features
+from ml.evaluate import full_evaluation_report, baseline_persistence, directional_accuracy
 from ml.features.feature_engineering import split_x_y, temporal_split, PriceModelFeatureEngineer
 from ml.s3_model_io import save_pipeline
 
@@ -76,25 +75,20 @@ pipeline.fit(X_trainval, y_trainval)
 y_pred = pipeline.predict(X_test)
 
 
-test_mae = (y_test - y_pred).abs().mean()
-test_baseline_pred = X_test["price_24h_lag"]
-baseline_mae = (y_test - test_baseline_pred).abs().mean()
+test_baseline_pred = X_test["price_24h_lag"]  # yesterday, same hour
 
-# y_pred is a numpy array; align it with y_test's index for differencing
-y_pred_series = pd.Series(y_pred, index=y_test.index)
-directional_accuracy = ((y_pred_series.diff() * y_test.diff()) > 0).mean()
-baseline_directional_accuracy = ((test_baseline_pred.diff() * y_test.diff()) > 0).mean()
+holdout_report = full_evaluation_report(
+    y_test, y_pred, reference=test_baseline_pred,
+    include_directional=True, include_peak=False,
+)
+baseline_report = baseline_persistence(test_baseline_pred, y_test)
+baseline_report["directional_accuracy"] = directional_accuracy(y_test, test_baseline_pred)
 
-ref = X_test["price_24h_lag"]  # yesterday, same hour
-model_up = (y_pred > ref)
-actual_up = (y_test > ref)
-deviation_direction_accuracy = (model_up == actual_up).mean()
-
-print(f"Baseline MAE: {baseline_mae:.2f} EUR/MWh")
-print(f"Model MAE: {test_mae:.2f} EUR/MWh")
-print(f"Baseline Directional Accuracy: {baseline_directional_accuracy:.2f}")
-print(f"Model Directional Accuracy: {directional_accuracy:.2f}")
-print(f"Model Deviation Directional Accuracy: {deviation_direction_accuracy:.2f}")
+print(f"Baseline MAE: {baseline_report['mae']:.2f} EUR/MWh")
+print(f"Model MAE: {holdout_report['mae']:.2f} EUR/MWh")
+print(f"Baseline Directional Accuracy: {baseline_report['directional_accuracy']:.2f}")
+print(f"Model Directional Accuracy: {holdout_report['directional_accuracy']:.2f}")
+print(f"Model Deviation Directional Accuracy: {holdout_report['deviation_directional_accuracy']:.2f}")
 
 report = {
     "model": "price_forecast",
@@ -107,13 +101,8 @@ report = {
     "cv_mae_mean": float(cv_mae.mean()),
     "cv_mae_std": float(cv_mae.std()),
     "cv_mae_per_fold": cv_mae.tolist(),
-    "holdout": {
-        "mae": float(test_mae),
-        "rmse": float(np.sqrt(((y_test - y_pred) ** 2).mean())),
-        "directional_accuracy": float(directional_accuracy),
-        "deviation_directional_accuracy": float(deviation_direction_accuracy),
-    },
-    "baseline_persistence": {"mae": float(baseline_mae), "directional_accuracy": float(baseline_directional_accuracy)},
+    "holdout": holdout_report,
+    "baseline_persistence": baseline_report,
     "n_features": pipeline.named_steps["model"].n_features_in_,
 }
 

@@ -2,15 +2,14 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 import pandas as pd
-import numpy as np
 from sklearn.compose import ColumnTransformer, make_column_selector
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
-from sklearn.metrics import r2_score
 
 from ml.data_access import load_features
+from ml.evaluate import full_evaluation_report, baseline_persistence
 from ml.features.feature_engineering import split_x_y, temporal_split, GenerationModelFeatureEngineer
 from ml.s3_model_io import save_pipeline
 
@@ -90,20 +89,18 @@ def train_generation_model(
     pipeline.fit(X_trainval, y_trainval)
     y_pred = pipeline.predict(X_test)
 
-    test_mae = (y_test - y_pred).abs().mean()
     test_baseline_pred = raw[target].shift(24).loc[X_test.index]
-    baseline_mae = (y_test - test_baseline_pred).abs().mean()
 
-    # y_pred is a numpy array; align it with y_test's index for differencing
-    y_pred_series = pd.Series(y_pred, index=y_test.index)
-    peak_mask = y_test > y_test.quantile(0.9)
-    peak_mae = (y_test[peak_mask] - y_pred_series[peak_mask]).abs().mean()
-    r2 = r2_score(y_test, y_pred)
+    holdout_report = full_evaluation_report(
+        y_test, y_pred, reference=test_baseline_pred,
+        include_directional=False, include_peak=True,
+    )
+    baseline_report = baseline_persistence(test_baseline_pred, y_test)
 
-    print(f"Baseline MAE: {baseline_mae:.2f} EUR/MWh")
-    print(f"Model MAE: {test_mae:.2f} EUR/MWh")
-    print(f"Model R^2: {r2:.4f}")
-    print(f"Model Peak MAE: {peak_mae:.2f} EUR/MWh")
+    print(f"Baseline MAE: {baseline_report['mae']:.2f} EUR/MWh")
+    print(f"Model MAE: {holdout_report['mae']:.2f} EUR/MWh")
+    print(f"Model R^2: {holdout_report['r2']:.4f}")
+    print(f"Model Peak MAE: {holdout_report['peak_mae']:.2f} EUR/MWh")
 
     report = {
         "model": f"{feature_name}_forecast",
@@ -116,13 +113,8 @@ def train_generation_model(
         "cv_mae_mean": float(cv_mae.mean()),
         "cv_mae_std": float(cv_mae.std()),
         "cv_mae_per_fold": cv_mae.tolist(),
-        "holdout": {
-            "mae": float(test_mae),
-            "rmse": float(np.sqrt(((y_test - y_pred) ** 2).mean())),
-            "r2": float(r2),
-            "peak_mae": float(peak_mae),
-        },
-        "baseline_persistence": {"mae": float(baseline_mae)},
+        "holdout": holdout_report,
+        "baseline_persistence": baseline_report,
         "n_features": pipeline.named_steps["model"].n_features_in_,
     }
 
