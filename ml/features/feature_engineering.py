@@ -31,7 +31,7 @@ LEAKING_GEN_COLS = [
     "natural_gas_mw",
     "hard_coal_mw",
     "brown_coal_mw",
-    "nuclear_mw",
+    #"nuclear_mw",
     "other_conventional_mw",
     "other_renewable_mw",
     "total_consumption_mw",
