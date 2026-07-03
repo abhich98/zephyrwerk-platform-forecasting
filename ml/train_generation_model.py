@@ -84,7 +84,7 @@ def train_generation_model(
     )
     cv_mae = -cv_scores  # sklearn returns negatives for consistency across scorers
     print(f"CV MAE per fold: {cv_mae}")
-    print(f"CV MAE mean: {cv_mae.mean():.2f} ± {cv_mae.std():.2f} EUR/MWh")
+    print(f"CV MAE mean: {cv_mae.mean():.2f} ± {cv_mae.std():.2f} mw")
 
     pipeline.fit(X_trainval, y_trainval)
     y_pred = pipeline.predict(X_test)
@@ -97,10 +97,10 @@ def train_generation_model(
     )
     baseline_report = baseline_persistence(test_baseline_pred, y_test)
 
-    print(f"Baseline MAE: {baseline_report['mae']:.2f} EUR/MWh")
-    print(f"Model MAE: {holdout_report['mae']:.2f} EUR/MWh")
+    print(f"Baseline MAE: {baseline_report['mae']:.2f} mw")
+    print(f"Model MAE: {holdout_report['mae']:.2f} mw")
     print(f"Model R^2: {holdout_report['r2']:.4f}")
-    print(f"Model Peak MAE: {holdout_report['peak_mae']:.2f} EUR/MWh")
+    print(f"Model Peak MAE: {holdout_report['peak_mae']:.2f} mw")
 
     report = {
         "model": f"{feature_name}_forecast",

@@ -27,7 +27,7 @@ dependencies = [
     "matplotlib>=3.9",
     # ML
     "scikit-learn>=1.5",
-    "xgboost>=2.0",
+    "xgboost-cpu >= 2.0.0",
     "joblib>=1.4",
     # Utilities
     "python-dotenv>=1.0",
