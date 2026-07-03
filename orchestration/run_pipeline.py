@@ -16,13 +16,16 @@ Incremental: fetches yesterday's data only.
 import argparse
 import logging
 from datetime import datetime, timedelta, timezone
-
+import subprocess
 from dotenv import load_dotenv
 
 from ingestion.loader import load_range
 from ingestion.s3_uploader import DATA_NAMES, is_already_uploaded, upload_to_s3
 from ingestion.smard_client import fetch_range
 from ingestion.weather_client import fetch_weather
+from ml.train_generation_model import start_generation_model_training
+from ml.train_price_model import start_price_model_training
+from ml.data_access import load_features
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -78,6 +81,21 @@ def _run_weather_single_day(start_date: datetime, end_date: datetime):
     upload_to_s3(weather_data, DATA_NAMES.WEATHER)
     logger.info("Weather data is upload to S3.")
 
+def _run_dbt(command: str) -> None:
+    logger.info(f"Starting: dbt {command}")
+    try:
+        result = subprocess.run(
+            ["dbt", command, "--project-dir", "dbt", "--profiles-dir", "dbt"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        logger.info(result.stdout)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"dbt {command} failed:\n{e.stdout}\n{e.stderr}")
+        raise
+    logger.info(f"Completed: dbt {command}")
+
 def run_pipeline(start_date: datetime, end_date: datetime):
     # For each day you fetch all 23 SMARD signals, combine into one long DataFrame, 
     # fetch weather, combine everything, then upload to S3.
@@ -95,6 +113,14 @@ def run_pipeline(start_date: datetime, end_date: datetime):
 
     # Load raw data from S3 into PostgreSQL
     load_range(start_date, end_date)
+
+    _run_dbt("run")  # Run dbt models to transform raw data into features
+    _run_dbt("test")  # Run dbt tests to validate the transformed data
+
+    # Train generation models for wind and solar
+    raw = load_features()
+    start_generation_model_training(raw)
+    start_price_model_training(raw)
 
 if __name__ == "__main__":
     args = parser()

@@ -1,74 +1,48 @@
 import json
+import logging
 from pathlib import Path
 from datetime import datetime, timezone
 import pandas as pd
-from sklearn.compose import ColumnTransformer, make_column_selector
-from sklearn.preprocessing import StandardScaler
-from xgboost import XGBRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 
 from ml.data_access import load_features
-from ml.evaluate import full_evaluation_report, baseline_persistence
 from ml.features.feature_engineering import split_x_y, temporal_split, GenerationModelFeatureEngineer
 from ml.s3_model_io import save_pipeline
+from ml.training_utils import (
+    ModelType,
+    filter_raw_data, 
+    create_preprocessor, 
+    create_ml_model, 
+    test_model, 
+    save_report, 
+    draw_predictions
+)
+logger = logging.getLogger(__name__)
 
-
-def train_generation_model(
-        raw: pd.DataFrame,
-        target: str,                # "wind_total_mw" or "solar_mw"
-        output_report_name: str     # e.g. "wind_model_report.json"
-) -> None:
+def train_generation_model( raw: pd.DataFrame, mode: ModelType) -> None:
     """
     Train a generation model (wind or solar) and save the report to a JSON file.
 
     Args:
         raw (pd.DataFrame): Raw features DataFrame.
-        target (str): Target variable, either "wind_total_mw" or "solar_mw".
-        output_report_name (str): Name of the output JSON report file.
+        mode (ModelType): Target variable, either ModelType.WIND or ModelType.SOLAR.
     """
-    feature_name = target.split("_")[0]  # "wind" or "solar"
-    if feature_name == "solar":
-        raw["solar_mw_lag_24h"] = raw["solar_mw"].shift(24)
-        raw["solar_mw_lag_168h"] = raw["solar_mw"].shift(168)
+    report = {"model": f"{mode.value}_forecast", "trained_at": datetime.now(timezone.utc).isoformat()}
 
-    X_raw, y_raw = split_x_y(raw, target=target)
+    X_raw, y_raw = split_x_y(raw, target="solar_mw" if mode == ModelType.SOLAR else "wind_total_mw")
 
-    # Run the transformer ONCE to identify NaN rows, then drop from raw indices
-    tmp = GenerationModelFeatureEngineer().transform(X_raw)
-    valid_idx = tmp.dropna().index
-    X_raw = X_raw.loc[valid_idx]
-    y = y_raw.loc[valid_idx]
-    del tmp
+    X_raw, y = filter_raw_data(X_raw, y_raw, mode)
 
     X_trainval, X_test, y_trainval, y_test = temporal_split(X_raw, y, holdout_days=90)
+    
+    report["n_train"] = len(X_trainval)
+    report["n_test"] = len(X_test)
+    report["train_window"] = {"start": str(X_trainval.index.min()), "end": str(X_trainval.index.max())}
+    report["test_window"] = {"start": str(X_test.index.min()), "end": str(X_test.index.max())}
 
-    print("Train/val date range:", X_trainval.index.min(), "to", X_trainval.index.max())
-    print("Test date range:", X_test.index.min(), "to", X_test.index.max())
-
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ("num", StandardScaler(), make_column_selector(dtype_include="number")),
-        ],
-        remainder="passthrough",
-        verbose_feature_names_out=False,
-    )
-    preprocessor.set_output(transform="pandas")   # keep as DataFrame for readability
-
-    xgb_params = dict(
-        n_estimators=500,
-        learning_rate=0.05,
-        max_depth=6,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=5,
-        reg_alpha=0.0,
-        reg_lambda=1.0,
-        random_state=42,
-        n_jobs=-1,
-        tree_method="hist",   # fast histogram-based training
-    )
-    model = XGBRegressor(**xgb_params)
+    preprocessor = create_preprocessor()
+    model = create_ml_model()
 
     pipeline = Pipeline([
         ("engineer", GenerationModelFeatureEngineer()),
@@ -83,63 +57,41 @@ def train_generation_model(
         cv=tscv, scoring="neg_mean_absolute_error", n_jobs=1,
     )
     cv_mae = -cv_scores  # sklearn returns negatives for consistency across scorers
-    print(f"CV MAE per fold: {cv_mae}")
-    print(f"CV MAE mean: {cv_mae.mean():.2f} ± {cv_mae.std():.2f} mw")
+    report["cv_mae_mean"] = float(cv_mae.mean())
+    report["cv_mae_std"] = float(cv_mae.std())
+    report["cv_mae_per_fold"] = cv_mae.tolist()
 
     pipeline.fit(X_trainval, y_trainval)
+    report["hyperparameters"] = model.get_params()
+    report["n_features"] = pipeline.named_steps["model"].n_features_in_
+
+
     y_pred = pipeline.predict(X_test)
+    test_baseline_pred = raw["solar_mw" if mode == ModelType.SOLAR else "wind_total_mw"].shift(24).loc[X_test.index]
 
-    test_baseline_pred = raw[target].shift(24).loc[X_test.index]
+    holdout_report, baseline_report = test_model(y_pred, y_test, test_baseline_pred, mode=mode)
+    report["holdout"] = holdout_report
+    report["baseline_persistence"] = baseline_report
 
-    holdout_report = full_evaluation_report(
-        y_test, y_pred, reference=test_baseline_pred,
-        include_directional=False, include_peak=True,
-    )
-    baseline_report = baseline_persistence(test_baseline_pred, y_test)
-
-    print(f"Baseline MAE: {baseline_report['mae']:.2f} mw")
-    print(f"Model MAE: {holdout_report['mae']:.2f} mw")
-    print(f"Model R^2: {holdout_report['r2']:.4f}")
-    print(f"Model Peak MAE: {holdout_report['peak_mae']:.2f} mw")
-
-    report = {
-        "model": f"{feature_name}_forecast",
-        "trained_at": datetime.now(timezone.utc).isoformat(),
-        "train_window": {"start": str(X_trainval.index.min()), "end": str(X_trainval.index.max())},
-        "test_window": {"start": str(X_test.index.min()), "end": str(X_test.index.max())},
-        "n_train": len(X_trainval),
-        "n_test": len(X_test),
-        "hyperparameters": xgb_params,
-        "cv_mae_mean": float(cv_mae.mean()),
-        "cv_mae_std": float(cv_mae.std()),
-        "cv_mae_per_fold": cv_mae.tolist(),
-        "holdout": holdout_report,
-        "baseline_persistence": baseline_report,
-        "n_features": pipeline.named_steps["model"].n_features_in_,
-    }
-
-    Path("ml/artifacts").mkdir(exist_ok=True)
-    with open(f"ml/artifacts/{output_report_name}", "w") as f:
-        json.dump(report, f, indent=2)
-
-    import matplotlib.pyplot as plt
-
-    # for one of the models, right after y_pred is computed
-    fig, ax = plt.subplots(figsize=(15, 4))
-    y_test.plot(ax=ax, label="actual", alpha=0.7)
-    pd.Series(y_pred, index=y_test.index).plot(ax=ax, label="predicted", alpha=0.7)
-    ax.legend()
-    ax.set_title(f"{target} — holdout")
-    plt.tight_layout()
-    plt.savefig(f"ml/artifacts/{target}_holdout.png", dpi=100)
+    save_report(report, mode=mode)
+    draw_predictions(y_pred, y_test, mode=mode)
 
     # Save the trained model to S3 with metadata
-    s3_uri = save_pipeline(pipeline, model_name=f"{feature_name}_forecast", metadata=report)
-    print(f"Model saved to {s3_uri}")
+    s3_uri = save_pipeline(pipeline, model_name=f"{mode.value}_forecast", metadata=report)
+    logger.info(f"Model saved to {s3_uri}")
+
+def start_generation_model_training(raw: pd.DataFrame = None):
+    """
+    Start the training of generation models for wind and solar using the full history of data.
+    """
+    raw["wind_total_mw"] = raw["wind_onshore_mw"] + raw["wind_offshore_mw"]
+    raw["solar_mw_lag_24h"] = raw["solar_mw"].shift(24)
+    raw["solar_mw_lag_168h"] = raw["solar_mw"].shift(168)
+    
+    train_generation_model(raw, ModelType.WIND)
+    train_generation_model(raw, ModelType.SOLAR)
 
 
-raw = load_features(start_date="2019-01-01")   # generation model uses full history
-raw["wind_total_mw"] = raw["wind_onshore_mw"] + raw["wind_offshore_mw"]
-
-train_generation_model(raw, "wind_total_mw", "wind_model_report.json")
-train_generation_model(raw, "solar_mw", "solar_model_report.json")
+if __name__ == "__main__":
+    raw = load_features(start_date="2019-01-01")   # generation model uses full history
+    start_generation_model_training(raw)
