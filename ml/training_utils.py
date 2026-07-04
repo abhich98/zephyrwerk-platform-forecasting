@@ -1,13 +1,15 @@
 import json
-from pathlib import Path
 from enum import Enum
-import pandas as pd
-from xgboost import XGBRegressor
-from sklearn.preprocessing import StandardScaler
-from sklearn.compose import ColumnTransformer, make_column_selector
+from pathlib import Path
 
-from ml.evaluate import directional_accuracy, full_evaluation_report, baseline_persistence
+import pandas as pd
+from sklearn.compose import ColumnTransformer, make_column_selector
+from sklearn.preprocessing import StandardScaler
+from xgboost import XGBRegressor
+
+from ml.evaluate import baseline_persistence, directional_accuracy, full_evaluation_report
 from ml.features.feature_engineering import GenerationModelFeatureEngineer, PriceModelFeatureEngineer
+
 
 class ModelType(Enum):
     PRICE = "price"

@@ -8,7 +8,7 @@ import pyarrow.dataset as ds
 from psycopg2.extras import execute_values
 from pyarrow.fs import S3FileSystem
 
-from db.settings import get_settings, Settings
+from db.settings import Settings, get_settings
 from ingestion.s3_uploader import DATA_NAMES, get_file_name
 from ingestion.smard_client import CONSUMPTION_TYPE, ENERGY_SOURCE, NEIGHBORING_REGION
 

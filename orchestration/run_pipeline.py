@@ -15,17 +15,18 @@ Incremental: fetches yesterday's data only.
 
 import argparse
 import logging
-from datetime import datetime, timedelta, timezone
 import subprocess
+from datetime import datetime, timedelta, timezone
+
 from dotenv import load_dotenv
 
 from ingestion.loader import load_range
 from ingestion.s3_uploader import DATA_NAMES, is_already_uploaded, upload_to_s3
 from ingestion.smard_client import fetch_range
 from ingestion.weather_client import fetch_weather
+from ml.data_access import load_features
 from ml.train_generation_model import start_generation_model_training
 from ml.train_price_model import start_price_model_training
-from ml.data_access import load_features
 
 load_dotenv()  # Load environment variables from .env file
 

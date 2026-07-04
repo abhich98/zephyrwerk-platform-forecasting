@@ -1,6 +1,7 @@
 from collections.abc import Generator
-from sqlalchemy.orm import sessionmaker
+
 from db.database import SessionLocal
+
 
 def get_db() -> Generator:
     """
