@@ -1,0 +1,79 @@
+{
+  "model": "solar_forecast",
+  "trained_at": "2026-07-03T07:14:27.988977+00:00",
+  "n_train": 62675,
+  "n_test": 2050,
+  "train_window": {
+    "start": "2019-01-08 00:00:00+00:00",
+    "end": "2026-03-11 23:00:00+00:00"
+  },
+  "test_window": {
+    "start": "2026-03-12 00:00:00+00:00",
+    "end": "2026-06-09 23:00:00+00:00"
+  },
+  "cv_mae_mean": 964.1363636301278,
+  "cv_mae_std": 100.46904484688726,
+  "cv_mae_per_fold": [
+    804.9216326964414,
+    1038.4087359900639,
+    896.4586750528583,
+    999.3506447703288,
+    1081.5421296409463
+  ],
+  "hyperparameters": {
+    "objective": "reg:squarederror",
+    "base_score": null,
+    "booster": null,
+    "callbacks": null,
+    "colsample_bylevel": null,
+    "colsample_bynode": null,
+    "colsample_bytree": 0.8,
+    "device": null,
+    "early_stopping_rounds": null,
+    "enable_categorical": true,
+    "eval_metric": null,
+    "feature_types": null,
+    "feature_weights": null,
+    "gamma": null,
+    "grow_policy": null,
+    "importance_type": null,
+    "interaction_constraints": null,
+    "learning_rate": 0.05,
+    "max_bin": null,
+    "max_cat_threshold": null,
+    "max_cat_to_onehot": null,
+    "max_delta_step": null,
+    "max_depth": 6,
+    "max_leaves": null,
+    "min_child_weight": 5,
+    "missing": NaN,
+    "monotone_constraints": null,
+    "multi_strategy": null,
+    "n_estimators": 500,
+    "n_jobs": -1,
+    "num_parallel_tree": null,
+    "random_state": 42,
+    "reg_alpha": 0.0,
+    "reg_lambda": 1.0,
+    "sampling_method": null,
+    "scale_pos_weight": null,
+    "subsample": 0.8,
+    "tree_method": "hist",
+    "validate_parameters": null,
+    "verbosity": null
+  },
+  "n_features": 63,
+  "holdout": {
+    "mae": 1395.2966004060263,
+    "rmse": 2539.362058687841,
+    "r2": 0.9723899809730864,
+    "directional_accuracy": 0.7034146341463414,
+    "deviation_directional_accuracy": 0.6253658536585366
+  },
+  "baseline_persistence": {
+    "mae": 2583.1436292682924,
+    "rmse": 5059.05592272509,
+    "r2": 0.8904136622906167,
+    "directional_accuracy": 0.7502439024390244
+  }
+}

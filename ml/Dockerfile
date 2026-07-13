@@ -4,14 +4,13 @@ WORKDIR /app
 
 # Copy dependency manifest first to leverage Docker layer caching
 COPY pyproject.toml README.md ./
-COPY ingestion/ ./ingestion/
-COPY orchestration/ ./orchestration/
+
+# Copy application source
+COPY ml/ ./ml/
+COPY db/ ./db/
 
 # Install build tools and project dependencies
 RUN pip install --no-cache-dir .
 
-# Copy application source
-COPY . .
-
 # Default entrypoint
-CMD ["python", "-m", "orchestration.run_pipeline"]
+CMD ["python", "-m", "ml.train_price_model"]
