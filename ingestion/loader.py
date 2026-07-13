@@ -8,6 +8,7 @@ import pyarrow.dataset as ds
 from psycopg2.extras import execute_values
 from pyarrow.fs import S3FileSystem
 
+from db.settings import Settings, get_settings
 from ingestion.s3_uploader import DATA_NAMES, get_file_name
 from ingestion.smard_client import CONSUMPTION_TYPE, ENERGY_SOURCE, NEIGHBORING_REGION
 
@@ -20,23 +21,22 @@ _PRICE_SIGNALS = {NEIGHBORING_REGION.DE_LU.name}
 _NEIGHBOUR_SIGNALS = {e.name for e in NEIGHBORING_REGION} - _PRICE_SIGNALS
 
 def _get_db_connection():
-    host = os.environ.get("ZEPHYRWERK_RDS_HOST")
-    port = int(os.environ.get("ZEPHYRWERK_RDS_PORT", "5432"))
-    user = os.environ.get("ZEPHYRWERK_RDS_USER")
-    password = os.environ.get("ZEPHYRWERK_RDS_PASSWORD")
-    dbname = os.environ.get("ZEPHYRWERK_RDS_DB")
+    settings: Settings = get_settings()
 
-    if not all([host, user, password, dbname]):
+    if not all([settings.ZEPHYRWERK_RDS_HOST, 
+                settings.ZEPHYRWERK_RDS_USER, 
+                settings.ZEPHYRWERK_RDS_PASSWORD, 
+                settings.ZEPHYRWERK_RDS_DB]):
         raise RuntimeError(
             "Missing one or more required ZEPHYRWERK_RDS_* environment variables"
         )
 
     return psycopg2.connect(
-        host=host,
-        port=port,
-        user=user,
-        password=password,
-        dbname=dbname,
+        host=settings.ZEPHYRWERK_RDS_HOST,
+        port=settings.ZEPHYRWERK_RDS_PORT,
+        user=settings.ZEPHYRWERK_RDS_USER,
+        password=settings.ZEPHYRWERK_RDS_PASSWORD,
+        dbname=settings.ZEPHYRWERK_RDS_DB,
     )
 
 def _get_filesystem():

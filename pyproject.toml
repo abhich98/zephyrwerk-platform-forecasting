@@ -16,6 +16,7 @@ dependencies = [
     # Database
     "psycopg2-binary>=2.9",
     "sqlalchemy>=2.0",
+    "pydantic-settings>=2.3",
     # API
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
@@ -23,13 +24,16 @@ dependencies = [
     # Dashboard
     "streamlit>=1.35",
     "plotly>=5.22",
+    "matplotlib>=3.9",
     # ML
     "scikit-learn>=1.5",
-    "xgboost>=2.0",
+    "xgboost",
     "joblib>=1.4",
     # Utilities
     "python-dotenv>=1.0",
     "holidays>=0.46",
+    "dbt-core>=1.7",
+    "dbt-postgres>=1.7",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +47,6 @@ dev = [
     "jupyterlab>=4.5",
     "matplotlib>=3.9",
     "seaborn>=0.13",
-    "dbt-postgres",
 ]
 
 [build-system]
