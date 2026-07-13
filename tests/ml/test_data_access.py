@@ -1,24 +1,10 @@
 import logging
-from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
 import ml.data_access as data_access
 
-
-# Mock settings before importing ml.data_access
-@pytest.fixture(scope="session", autouse=True)
-def mock_settings():
-    with patch.dict('os.environ', {
-        'ZEPHYRWERK_RDS_HOST': 'localhost',
-        'ZEPHYRWERK_RDS_PORT': '5432',
-        'ZEPHYRWERK_RDS_DATABASE': 'test_db',
-        'ZEPHYRWERK_RDS_USER': 'test_user',
-        'ZEPHYRWERK_RDS_PASSWORD': 'test_password',
-        'ZEPHYRWERK_DASHBOARD_API_URL': 'http://localhost:8000',
-    }):
-        yield
 
 class FakeConnection:
     def __enter__(self):
