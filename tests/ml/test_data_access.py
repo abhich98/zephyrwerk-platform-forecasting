@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 import ml.data_access as data_access
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 # Mock settings before importing ml.data_access
 @pytest.fixture(scope="session", autouse=True)
