@@ -77,7 +77,7 @@ def train_generation_model( raw: pd.DataFrame, mode: ModelType) -> None:
     draw_predictions(y_pred, y_test, mode=mode)
 
     # Save the trained model to S3 with metadata
-    s3_uri = save_pipeline(pipeline, model_name=f"{mode.value}_forecast", metadata=report)
+    s3_uri = save_pipeline(pipeline, model_type=mode, metadata=report)
     logger.info(f"Model saved to {s3_uri}")
 
 def start_generation_model_training(raw: pd.DataFrame = None):

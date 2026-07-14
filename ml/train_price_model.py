@@ -74,7 +74,7 @@ def start_price_model_training(raw):
     save_report(report, mode=ModelType.PRICE)
     draw_predictions(y_pred, y_test, mode=ModelType.PRICE)
 
-    s3_uri = save_pipeline(pipeline, model_name="price_forecast", metadata=report)
+    s3_uri = save_pipeline(pipeline, model_type=ModelType.PRICE, metadata=report)
     logger.info(f"Model saved to {s3_uri}")
 
 if __name__ == "__main__":
