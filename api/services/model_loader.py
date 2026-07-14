@@ -10,12 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 class MLModel:
-
     def __init__(self, model_type: ModelType):
         self.pipeline, self.metadata = load_pipeline(model_type)
-
-    def predict(self):
-        pass
 
 
 @asynccontextmanager
@@ -26,7 +22,7 @@ async def lifespan(app: FastAPI):
         try:
             models[model_type] = MLModel(model_type)
         except Exception as e:
-            logger.error(f"Failed to load {model_type.value}: e")
+            logger.error(f"Failed to load {model_type.value}: {e}")
 
     app.state.models = models
 

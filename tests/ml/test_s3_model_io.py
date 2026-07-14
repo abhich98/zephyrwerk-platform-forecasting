@@ -11,7 +11,7 @@ from ml.training_utils import ModelType
 BUCKET = "zephyrwerk-test-models-bucket"
 REGION = "eu-central-1"
 MODEL_TYPE = ModelType.PRICE
-MODEL_NAME = f"{MODEL_TYPE.value}_model"
+MODEL_NAME = f"{MODEL_TYPE.value}_forecast"
 
 
 @pytest.fixture

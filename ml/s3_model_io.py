@@ -47,7 +47,7 @@ def save_pipeline(pipeline, model_type: ModelType, metadata: dict | None = None)
     s3 = _get_s3_client()
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    model_name = f"{model_type.value}_model"
+    model_name = f"{model_type.value}_forecast"
     archive_prefix = f"models/{model_name}/archive/{timestamp}"
     latest_prefix = f"models/{model_name}/latest"
 
@@ -87,7 +87,7 @@ def load_pipeline(model_type: ModelType, version: str = "latest") -> tuple:
     bucket = _get_bucket_name()
     s3 = _get_s3_client()
 
-    model_name = f"{model_type.value}_model"
+    model_name = f"{model_type.value}_forecast"
     prefix = f"models/{model_name}/latest" if version == "latest" else f"models/{model_name}/archive/{version}"
     model_key = f"{prefix}/{model_name}.joblib"
     meta_key = f"{prefix}/metadata.json"
