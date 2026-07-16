@@ -84,10 +84,6 @@ def start_generation_model_training(raw: pd.DataFrame = None):
     """
     Start the training of generation models for wind and solar using the full history of data.
     """
-    raw["wind_total_mw"] = raw["wind_onshore_mw"] + raw["wind_offshore_mw"]
-    raw["solar_mw_lag_24h"] = raw["solar_mw"].shift(24)
-    raw["solar_mw_lag_168h"] = raw["solar_mw"].shift(168)
-    
     train_generation_model(raw, ModelType.WIND)
     train_generation_model(raw, ModelType.SOLAR)
 

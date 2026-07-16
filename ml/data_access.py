@@ -41,7 +41,12 @@ def load_features(start_date: str | None = None, end_date: str | None = None) ->
             df = pd.read_sql_query(text(query), conn, params=params)
             logger.info(f"Loaded {len(df)} features from the database.")
 
-        return df.set_index("timestamp").sort_index()
+        raw = df.set_index("timestamp").sort_index()
+        raw["wind_total_mw"] = raw["wind_onshore_mw"] + raw["wind_offshore_mw"]
+        raw["solar_mw_lag_24h"] = raw["solar_mw"].shift(24)
+        raw["solar_mw_lag_168h"] = raw["solar_mw"].shift(168)
+
+        return raw
     except Exception:
         logger.exception("Failed to load features")
         raise

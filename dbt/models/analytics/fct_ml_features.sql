@@ -81,4 +81,4 @@ FROM
         ON g.timestamp = w.timestamp
         JOIN
     {{ ref('dim_date') }} AS d
-        ON g.timestamp :: date = d.date_day
+        ON w.timestamp :: date = d.date_day
