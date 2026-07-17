@@ -5,7 +5,7 @@ import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 from sklearn.pipeline import Pipeline
 
-from ml.data_access import load_features
+from ml.data_access import load_ml_features
 from ml.features.feature_engineering import GenerationModelFeatureEngineer, split_x_y, temporal_split
 from ml.s3_model_io import save_pipeline
 from ml.training_utils import (
@@ -30,7 +30,7 @@ def train_generation_model( raw: pd.DataFrame, mode: ModelType) -> None:
     """
     report = {"model": f"{mode.value}_forecast", "trained_at": datetime.now(timezone.utc).isoformat()}
 
-    X_raw, y_raw = split_x_y(raw, target="solar_mw" if mode == ModelType.SOLAR else "wind_total_mw")
+    X_raw, y_raw = split_x_y(raw, mode)
 
     X_raw, y = filter_raw_data(X_raw, y_raw, mode)
 
@@ -89,5 +89,5 @@ def start_generation_model_training(raw: pd.DataFrame = None):
 
 
 if __name__ == "__main__":
-    raw = load_features(start_date="2019-01-01")   # generation model uses full history
+    raw = load_ml_features(start_date="2019-01-01")   # generation model uses full history
     start_generation_model_training(raw)

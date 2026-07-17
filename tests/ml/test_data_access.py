@@ -38,7 +38,7 @@ def capture_read_sql(monkeypatch):
 
 
 def test_load_features_no_date_filters(fake_engine, capture_read_sql):
-    data_access.load_features()
+    data_access.load_ml_features()
 
     query = capture_read_sql[0]["query"]
     assert "WHERE 1=1" in query
@@ -49,7 +49,7 @@ def test_load_features_no_date_filters(fake_engine, capture_read_sql):
 
 
 def test_load_features_with_start_date_only(fake_engine, capture_read_sql):
-    data_access.load_features(start_date="2024-01-01")
+    data_access.load_ml_features(start_date="2024-01-01")
 
     call = capture_read_sql[0]
     assert "AND timestamp >= :start_date" in call["query"]
@@ -58,7 +58,7 @@ def test_load_features_with_start_date_only(fake_engine, capture_read_sql):
 
 
 def test_load_features_with_end_date_only(fake_engine, capture_read_sql):
-    data_access.load_features(end_date="2024-02-01")
+    data_access.load_ml_features(end_date="2024-02-01")
 
     call = capture_read_sql[0]
     assert "AND timestamp <= :end_date" in call["query"]
@@ -67,7 +67,7 @@ def test_load_features_with_end_date_only(fake_engine, capture_read_sql):
 
 
 def test_load_features_with_both_dates(fake_engine, capture_read_sql):
-    data_access.load_features(start_date="2024-01-01", end_date="2024-02-01")
+    data_access.load_ml_features(start_date="2024-01-01", end_date="2024-02-01")
 
     call = capture_read_sql[0]
     assert "AND timestamp >= :start_date" in call["query"]
@@ -76,14 +76,14 @@ def test_load_features_with_both_dates(fake_engine, capture_read_sql):
 
 
 def test_load_features_indexes_and_sorts_by_timestamp(fake_engine, capture_read_sql):
-    df = data_access.load_features()
+    df = data_access.load_ml_features()
 
     assert df.index.name == "timestamp"
     assert df.index.is_monotonic_increasing
 
 
 def test_load_features_computes_wind_total(fake_engine, capture_read_sql):
-    df = data_access.load_features()
+    df = data_access.load_ml_features()
 
     # load_features sorts ascending by timestamp, so 2024-01-01 (25.0) comes
     # before 2024-01-02 (38.0), even though the fixture returns them reversed.
@@ -93,7 +93,7 @@ def test_load_features_computes_wind_total(fake_engine, capture_read_sql):
 def test_load_features_solar_lags_are_nan_with_insufficient_history(fake_engine, capture_read_sql):
     # Only 2 rows are available here, well short of the 24h/168h lookback —
     # shift() should produce NaN rather than wrapping around or erroring.
-    df = data_access.load_features()
+    df = data_access.load_ml_features()
 
     assert df["solar_mw_lag_24h"].isna().all()
     assert df["solar_mw_lag_168h"].isna().all()
@@ -114,7 +114,7 @@ def test_load_features_solar_lag_24h_pulls_correct_historical_value(fake_engine,
 
     monkeypatch.setattr(data_access.pd, "read_sql_query", fake_read_sql_query)
 
-    df = data_access.load_features()
+    df = data_access.load_ml_features()
 
     # Row at index 24 (hour 24) should carry hour 0's solar value as its 24h lag.
     assert df["solar_mw_lag_24h"].iloc[24] == solar_values[0]
@@ -129,6 +129,6 @@ def test_load_features_logs_and_reraises_on_failure(fake_engine, monkeypatch, ca
 
     with caplog.at_level(logging.ERROR):
         with pytest.raises(RuntimeError, match="db exploded"):
-            data_access.load_features()
+            data_access.load_ml_features()
 
     assert "Failed to load features" in caplog.text

@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 
 from ingestion.loader import load_range, load_from_s3_to_db
-from ml.data_access import load_features
+from ml.data_access import load_ml_features
 from ml.train_generation_model import start_generation_model_training
 from ingestion.s3_uploader import DATA_NAMES, is_already_uploaded, upload_to_s3
 from ingestion.smard_client import fetch_range
@@ -139,7 +139,7 @@ def run_historical_pipeline(start_date: datetime, end_date: datetime):
 # Run Weekly
 def run_model_training():
     # Train generation models for wind and solar
-    raw = load_features()
+    raw = load_ml_features()
     start_generation_model_training(raw)
     start_price_model_training(raw)
 

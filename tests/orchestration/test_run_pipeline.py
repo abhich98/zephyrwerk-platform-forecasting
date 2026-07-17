@@ -247,7 +247,7 @@ class TestRunHistoricalPipeline:
 class TestRunModelTraining:
     def test_loads_features_and_trains_both_models(self):
         raw = pd.DataFrame({"a": [1]})
-        with patch("orchestration.run_pipeline.load_features", return_value=raw) as mock_load, \
+        with patch("orchestration.run_pipeline.load_ml_features", return_value=raw) as mock_load, \
              patch("orchestration.run_pipeline.start_generation_model_training") as mock_gen, \
              patch("orchestration.run_pipeline.start_price_model_training") as mock_price:
             run_pipeline.run_model_training()

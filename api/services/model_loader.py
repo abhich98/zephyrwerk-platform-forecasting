@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 class MLModel:
     def __init__(self, model_type: ModelType):
+        self.model_type = model_type
         self.pipeline, self.metadata = load_pipeline(model_type)
 
 
