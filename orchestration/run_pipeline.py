@@ -8,18 +8,18 @@ fetches the relevant data, and uploads it to S3.
 import argparse
 import logging
 import subprocess
-from enum import Enum
-from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 
-from ingestion.loader import load_range, load_from_s3_to_db
-from ml.data_access import load_ml_features
-from ml.train_generation_model import start_generation_model_training
+from dotenv import load_dotenv
+
+from ingestion.loader import load_range
 from ingestion.s3_uploader import DATA_NAMES, is_already_uploaded, upload_to_s3
 from ingestion.smard_client import fetch_range
-from ingestion.weather_client import fetch_historical_weather, fetch_forecast_weather
+from ingestion.weather_client import fetch_forecast_weather, fetch_historical_weather
+from ml.data_access import load_ml_features
+from ml.train_generation_model import start_generation_model_training
 from ml.train_price_model import start_price_model_training
-
 
 load_dotenv()  # Load environment variables from .env file
 
@@ -92,7 +92,7 @@ def run_weather_forecast(start_date: datetime, end_date:datetime):
     logger.info(f"Weather forecast fetch operation is successfull with {len(weather_forecast_data)} rows.")
 
     upload_to_s3(weather_forecast_data, DATA_NAMES.WEATHER_FORECAST)
-    logger.info(f"Weather forecast data is uploaded to S3.")
+    logger.info("Weather forecast data is uploaded to S3.")
 
 def run_dbt(command: str) -> None:
     logger.info(f"Starting: dbt {command}")

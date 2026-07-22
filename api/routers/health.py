@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import Connection, text
 
 from api.schemas.responses import HealthResponse
 from db.deps import get_db
 from ml.training_utils import ModelType
-
 
 router = APIRouter(prefix="/health",tags=["health"])
 @router.get("", response_model=HealthResponse)

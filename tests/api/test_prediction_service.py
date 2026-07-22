@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
-import pytest
 
 import api.services.prediction_service as prediction_service
 from api.services.prediction_service import (
@@ -38,7 +37,9 @@ def _buffer_and_forecast_series(today: pd.Timestamp, n_future_day: int) -> pd.Se
     land on unrealized rows near the start of the forecast horizon.
     """
     buffer_idx = pd.date_range(today - pd.Timedelta(days=7), today, freq="h", tz="UTC")
-    forecast_idx = pd.date_range(today + pd.Timedelta(hours=1), today + pd.Timedelta(days=n_future_day), freq="h", tz="UTC")
+    forecast_idx = pd.date_range(
+        today + pd.Timedelta(hours=1), today + pd.Timedelta(days=n_future_day), freq="h", tz="UTC"
+    )
     idx = buffer_idx.append(forecast_idx)
     values = np.concatenate([
         np.arange(len(buffer_idx), dtype=float),

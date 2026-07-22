@@ -1,18 +1,19 @@
 from datetime import date
+
 from sqlalchemy import Connection
 
-from api.schemas.responses import (
-    EnergySummaryResponse,
-    EnergyGenerationResponse,
-    EnergyGeneration,
-    DayAheadPrice,
-    DayAheadResponse
-)
 from api.repositories.energy_repository import (
-    query_generation_mix,
     query_avg_price,
-    query_generation_sources,
     query_day_ahead_prices,
+    query_generation_mix,
+    query_generation_sources,
+)
+from api.schemas.responses import (
+    DayAheadPrice,
+    DayAheadResponse,
+    EnergyGeneration,
+    EnergyGenerationResponse,
+    EnergySummaryResponse,
 )
 from ml.energy_sources import RENEWABLE_SOURCE_COLUMNS
 
@@ -33,7 +34,9 @@ def get_energy_summary(db: Connection, target_date: date) -> EnergySummaryRespon
                          renewable_share=renewable_share)
 
 
-def get_generated_energy(db: Connection, start_date: date | None, end_date: date | None, source: str | None) -> EnergyGenerationResponse:
+def get_generated_energy(
+    db: Connection, start_date: date | None, end_date: date | None, source: str | None
+) -> EnergyGenerationResponse:
     energy_by_sources = query_generation_sources(db, start_date, end_date, source)
 
     results = [

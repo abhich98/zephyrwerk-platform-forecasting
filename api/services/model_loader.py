@@ -1,10 +1,10 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request, status
 import logging
+from contextlib import asynccontextmanager
 
-from ml.training_utils import ModelType
+from fastapi import FastAPI, HTTPException, Request, status
+
 from ml.s3_model_io import load_pipeline
-
+from ml.training_utils import ModelType
 
 logger = logging.getLogger(__name__)
 

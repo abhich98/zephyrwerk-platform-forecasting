@@ -11,7 +11,6 @@ import joblib
 
 from ml.training_utils import ModelType
 
-
 logger = logging.getLogger(__name__)
 
 _s3_client = None

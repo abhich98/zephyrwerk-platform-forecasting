@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Any
 
-from sqlalchemy import text, Connection
+from sqlalchemy import Connection, text
 
 from ml.energy_sources import GENERATION_SOURCE_COLUMNS
 
@@ -18,7 +18,9 @@ def _add_date_range_filter(params: dict[str, Any], start_date: date | None, end_
     return "".join(f" AND {clause}" for clause in clauses)
 
 
-def query_generation_sources(db: Connection, start_date: date | None, end_date: date | None, source: str | None) -> list[dict[str, Any]]:
+def query_generation_sources(
+    db: Connection, start_date: date | None, end_date: date | None, source: str | None
+) -> list[dict[str, Any]]:
     if source and source not in GENERATION_SOURCE_COLUMNS:
         raise ValueError(f"Unknown generation source '{source}'. Valid sources: {sorted(GENERATION_SOURCE_COLUMNS)}")
 

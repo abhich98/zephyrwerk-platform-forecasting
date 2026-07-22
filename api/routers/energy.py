@@ -1,12 +1,12 @@
-from typing import Annotated
 from datetime import date
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Connection
 
+from api.schemas.responses import DayAheadResponse, EnergyGenerationResponse, EnergySummaryResponse
+from api.services.data_services import get_day_ahead_prices, get_energy_summary, get_generated_energy
 from db.deps import get_db
-from api.services.data_services import get_energy_summary, get_generated_energy, get_day_ahead_prices
-from api.schemas.responses import EnergyGenerationResponse, EnergySummaryResponse, DayAheadResponse
 
 router = APIRouter(prefix="/energy", tags=["energy"])
 

@@ -1,19 +1,12 @@
-from typing import Annotated
 from datetime import datetime, time, timezone
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from api.services.model_loader import MLModel
 from api.schemas.requests import PredictionRequest
-from api.schemas.responses import (
-    PriceResponse, 
-    GenerationResponse, 
-    HourlyPrediction,
-    GenerationPrediction
-)
-from api.services.model_loader import get_price_model, get_solar_model, get_wind_model
+from api.schemas.responses import GenerationPrediction, GenerationResponse, HourlyPrediction, PriceResponse
+from api.services.model_loader import MLModel, get_price_model, get_solar_model, get_wind_model
 from api.services.prediction_service import predict
-
 
 router = APIRouter(prefix="/predict", tags=["predict"])
 
