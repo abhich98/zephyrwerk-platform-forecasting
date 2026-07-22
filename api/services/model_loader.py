@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, status
 import logging
 
 from ml.training_utils import ModelType
@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 def _get_model_or_503(request: Request, model_type: ModelType) -> MLModel:
     model = request.app.state.models.get(model_type)
     if model is None:
-        raise HTTPException(status_code=503,
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                             detail=f"{model_type.value} model not available.")
 
     return model

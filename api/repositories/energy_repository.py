@@ -3,21 +3,7 @@ from typing import Any
 
 from sqlalchemy import text, Connection
 
-
-GENERATION_SOURCE_COLUMNS = [
-    "wind_onshore_mw",
-    "wind_offshore_mw",
-    "solar_mw",
-    "biomass_mw",
-    "hydropower_mw",
-    "natural_gas_mw",
-    "pumped_storage_mw",
-    "hard_coal_mw",
-    "brown_coal_mw",
-    "nuclear_mw",
-    "other_conventional_mw",
-    "other_renewable_mw",
-]
+from ml.energy_sources import GENERATION_SOURCE_COLUMNS
 
 
 def _add_date_range_filter(params: dict[str, Any], start_date: date | None, end_date: date | None) -> str:
@@ -32,7 +18,7 @@ def _add_date_range_filter(params: dict[str, Any], start_date: date | None, end_
     return "".join(f" AND {clause}" for clause in clauses)
 
 
-def get_generation_sources(db: Connection, start_date: date | None, end_date: date | None, source: str | None) -> list[dict[str, Any]]:
+def query_generation_sources(db: Connection, start_date: date | None, end_date: date | None, source: str | None) -> list[dict[str, Any]]:
     if source and source not in GENERATION_SOURCE_COLUMNS:
         raise ValueError(f"Unknown generation source '{source}'. Valid sources: {sorted(GENERATION_SOURCE_COLUMNS)}")
 
@@ -47,7 +33,7 @@ def get_generation_sources(db: Connection, start_date: date | None, end_date: da
     return [dict(row._mapping) for row in result.fetchall()]
 
 
-def get_day_ahead_prices(db: Connection, start_date: date | None, end_date: date | None) -> list[dict[str, Any]]:
+def query_day_ahead_prices(db: Connection, start_date: date | None, end_date: date | None) -> list[dict[str, Any]]:
     query = "SELECT timestamp, price_eur_mwh FROM analytics.fct_market_prices WHERE 1=1"
 
     params: dict[str, Any] = {}
@@ -58,7 +44,7 @@ def get_day_ahead_prices(db: Connection, start_date: date | None, end_date: date
     return [dict(row._mapping) for row in result]
 
 
-def get_generation_mix(db: Connection, target_date: date) -> dict[str, float]:
+def query_generation_mix(db: Connection, target_date: date) -> dict[str, float]:
     """Average MW per generation source for a single day. Pure SQL aggregation, no domain logic."""
     aggregates = ", ".join(f"AVG({col}) AS {col}" for col in GENERATION_SOURCE_COLUMNS)
     query = (
@@ -69,7 +55,7 @@ def get_generation_mix(db: Connection, target_date: date) -> dict[str, float]:
     return {col: value for col, value in row.items() if value is not None}
 
 
-def get_avg_price(db: Connection, target_date: date) -> float | None:
+def query_avg_price(db: Connection, target_date: date) -> float | None:
     query = (
         "SELECT AVG(price_eur_mwh) AS avg_price FROM analytics.fct_market_prices "
         "WHERE timestamp::date = :target_date"

@@ -17,13 +17,17 @@ class PriceResponse(BaseModel):
     prices: list[HourlyPrediction]
     model_trained_at: str | None = None
 
+class GenerationPrediction(BaseModel):
+    generations: list[HourlyPrediction]
+    model_trained_at: str | None = None
+
 
 class GenerationResponse(BaseModel):
     """Predicted solar and wind generation, optionally scoped to a single hour."""
     target_date: date
     hour: int | None = Field(default=None, ge=0, le=23, description="Hour of day (0-23)")
-    solar_generations: list[HourlyPrediction]
-    wind_generations: list[HourlyPrediction]
+    solar_generations: GenerationPrediction
+    wind_generations: GenerationPrediction
 
 
 # ENERGY GETs
@@ -36,8 +40,8 @@ class EnergyGeneration(BaseModel):
 
 class EnergyGenerationResponse(BaseModel):
     """Historical generation over a date range, optionally filtered to one source."""
-    start_date: date
-    end_date: date
+    start_date: date | None
+    end_date: date | None
     source: str | None = None
     generated_energy: list[EnergyGeneration]
 
@@ -59,8 +63,8 @@ class DayAheadPrice(BaseModel):
 
 class DayAheadResponse(BaseModel):
     """Historical day-ahead prices over a date range."""
-    start_date: date
-    end_date: date
+    start_date: date | None
+    end_date: date | None
     prices: list[DayAheadPrice]
 
 
