@@ -6,14 +6,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from api.schemas.requests import PredictionRequest
 from api.schemas.responses import GenerationPrediction, GenerationResponse, HourlyPrediction, PriceResponse
 from api.services.model_loader import MLModel, get_price_model, get_solar_model, get_wind_model
-from api.services.prediction_service import predict
+from api.services.prediction_service import ForecastDataUnavailable, predict
 
 router = APIRouter(prefix="/predict", tags=["predict"])
 
 @router.post("/price", response_model=PriceResponse)
-def predict_price(body: PredictionRequest, 
+def predict_price(body: PredictionRequest,
                   model: Annotated[MLModel, Depends(get_price_model)]) -> PriceResponse:
-    predictions = predict(model, body.target_date)
+    try:
+        predictions = predict(model, body.target_date)
+    except ForecastDataUnavailable as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
 
     if body.hour is not None:
         exact_datetime = datetime.combine(body.target_date, time(body.hour), tzinfo=timezone.utc)
@@ -36,8 +39,11 @@ def predict_price(body: PredictionRequest,
 def predict_generation(body: PredictionRequest, 
                        solar_model: Annotated[MLModel, Depends(get_solar_model)],
                        wind_model: Annotated[MLModel, Depends(get_wind_model)]) -> GenerationResponse:
-    solar_predictions = predict(solar_model, body.target_date)
-    wind_predictions = predict(wind_model, body.target_date)
+    try:
+        solar_predictions = predict(solar_model, body.target_date)
+        wind_predictions = predict(wind_model, body.target_date)
+    except ForecastDataUnavailable as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
 
     if body.hour is not None:
         exact_datetime = datetime.combine(body.target_date, time(body.hour), tzinfo=timezone.utc)

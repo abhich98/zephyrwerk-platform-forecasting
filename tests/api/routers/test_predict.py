@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 import api.routers.predict as predict_router
+from api.services.prediction_service import ForecastDataUnavailable
 from ml.training_utils import ModelType
 
 # predict() is imported with `from api.services.prediction_service import predict`
@@ -153,6 +154,17 @@ class TestPredictPrice:
         response = client.post("/predict/price", json=body)
         assert response.status_code == 422
 
+    def test_forecast_data_unavailable_returns_503_not_500(self, client, monkeypatch):
+        def _raise_forecast_unavailable(model, target_date):
+            raise ForecastDataUnavailable(f"Weather forecast data not yet available for {target_date}")
+
+        monkeypatch.setattr(predict_router, "predict", _raise_forecast_unavailable)
+
+        response = client.post("/predict/price", json={"target_date": str(TODAY)})
+
+        assert response.status_code == 503
+        assert str(TODAY) in response.json()["detail"]
+
 
 class TestPredictGeneration:
     def _patch_generation_predict(self, monkeypatch, solar_predictions, wind_predictions):
@@ -251,3 +263,14 @@ class TestPredictGeneration:
     def test_malformed_request_body_returns_422(self, client, body):
         response = client.post("/predict/generation", json=body)
         assert response.status_code == 422
+
+    def test_forecast_data_unavailable_returns_503_not_500(self, client, monkeypatch):
+        def _raise_forecast_unavailable(model, target_date):
+            raise ForecastDataUnavailable(f"Weather forecast data not yet available for {target_date}")
+
+        monkeypatch.setattr(predict_router, "predict", _raise_forecast_unavailable)
+
+        response = client.post("/predict/generation", json={"target_date": str(TODAY)})
+
+        assert response.status_code == 503
+        assert str(TODAY) in response.json()["detail"]

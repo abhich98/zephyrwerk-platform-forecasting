@@ -3,9 +3,12 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 
+import pytest
+
 import api.services.prediction_service as prediction_service
 from api.services.prediction_service import (
     PRICE_LAG_HORIZONS,
+    ForecastDataUnavailable,
     _lag_with_fallback,
     _patch_generation_lags,
     _patch_price_lags,
@@ -173,6 +176,35 @@ class TestGetInferenceData:
         elapsed_hour = TODAY + pd.Timedelta(hours=10)
         assert elapsed_hour in features.index
         assert not np.isnan(features.loc[elapsed_hour, "price_eur_mwh"])
+
+    def test_raises_when_forecast_query_returns_no_rows_for_target_date(self, monkeypatch):
+        """Daily pipeline hasn't run yet: the forecast loader returns nothing."""
+
+        def _empty_forecast(start, end):
+            return pd.DataFrame(
+                columns=["temperature_2m_bavaria"], index=pd.DatetimeIndex([], tz="UTC")
+            )
+
+        monkeypatch.setattr(prediction_service, "load_ml_features", _fake_load_ml_features)
+        monkeypatch.setattr(prediction_service, "load_weather_forecast", _empty_forecast)
+        _freeze_now(monkeypatch, TODAY)
+
+        with pytest.raises(ForecastDataUnavailable):
+            get_inference_data(target_date=(TODAY + pd.Timedelta(days=1)).date())
+
+    def test_raises_when_forecast_rows_exist_but_forecast_columns_are_all_null(self, monkeypatch):
+        """Pipeline ran but left the forecast columns null (e.g. upstream weather API failure)."""
+
+        def _null_forecast(start, end):
+            idx = pd.date_range(start, end, freq="h", tz="UTC")
+            return pd.DataFrame({"temperature_2m_bavaria": np.full(len(idx), np.nan)}, index=idx)
+
+        monkeypatch.setattr(prediction_service, "load_ml_features", _fake_load_ml_features)
+        monkeypatch.setattr(prediction_service, "load_weather_forecast", _null_forecast)
+        _freeze_now(monkeypatch, TODAY)
+
+        with pytest.raises(ForecastDataUnavailable):
+            get_inference_data(target_date=(TODAY + pd.Timedelta(days=1)).date())
 
 
 class _CaptureModel:

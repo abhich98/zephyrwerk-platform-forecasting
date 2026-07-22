@@ -14,6 +14,16 @@ from ml.features.feature_engineering import LAG_HORIZONS, LEAKING_GEN_COLS, spli
 PRICE_LAG_HORIZONS = [24, 48, 168]
 
 
+class ForecastDataUnavailable(Exception):
+    """
+    Raised when fct_weather_forecast_features has no usable rows for the
+    requested target_date (daily pipeline hasn't run yet, or ran but left
+    the forecast columns null). Callers should turn this into a 503 rather
+    than letting the missing data surface as a downstream TypeError from
+    the feature pipeline (e.g. np.sin() on a null forecast column).
+    """
+
+
 def _lag_with_fallback(series: pd.Series, horizons: list[int]) -> pd.Series:
     """
     Positional lag with cascading fallback to the next-longest horizon
@@ -49,7 +59,22 @@ def get_inference_data(target_date: date) -> pd.DataFrame:
     weather_forecast = load_weather_forecast(now + timedelta(hours=1), target_end)
 
     features = pd.concat([buffer_features, weather_forecast]).sort_index()
-    return features[~features.index.duplicated(keep="first")]
+    features = features[~features.index.duplicated(keep="first")]
+
+    target_mask = (features.index >= target_start) & (features.index <= target_end)
+    target_rows = features.loc[target_mask]
+
+    forecast_cols = [c for c in weather_forecast.columns if c in target_rows.columns]
+    incomplete = len(target_rows) < 24 or (
+        forecast_cols and target_rows[forecast_cols].isna().all().all()
+    )
+    if incomplete:
+        raise ForecastDataUnavailable(
+            f"Weather forecast data not yet available for {target_date} — "
+            "check that the daily pipeline has run."
+        )
+
+    return features
 
 
 def _patch_price_lags(features: pd.DataFrame) -> pd.DataFrame:
@@ -95,3 +120,5 @@ def predict(ml_model: MLModel, target_date: date) -> dict[datetime, float]:
     target_mask = (features.index >= target_start) & (features.index <= target_end)
 
     return dict(zip(features.index[target_mask], preds[target_mask]))
+
+get_inference_data(date(2026, 7, 23))

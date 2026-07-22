@@ -29,7 +29,7 @@ def start_price_model_training(raw):
     """
     report = {"model": "price_forecast", "trained_at": datetime.now(timezone.utc).isoformat()}
 
-    X_raw, y_raw = split_x_y(raw, target=ModelType.PRICE)
+    X_raw, y_raw = split_x_y(raw, ModelType.PRICE)
 
     X_raw, y = filter_raw_data(X_raw, y_raw, ModelType.PRICE)
 
