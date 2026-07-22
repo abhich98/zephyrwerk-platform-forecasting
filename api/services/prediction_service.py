@@ -120,5 +120,3 @@ def predict(ml_model: MLModel, target_date: date) -> dict[datetime, float]:
     target_mask = (features.index >= target_start) & (features.index <= target_end)
 
     return dict(zip(features.index[target_mask], preds[target_mask]))
-
-get_inference_data(date(2026, 7, 23))
