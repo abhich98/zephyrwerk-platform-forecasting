@@ -1,8 +1,8 @@
 """
-This is the orchestration entry point. It wires the three modules together to fetch SMARD data, 
-fetch weather data, and upload both to S3 for a given date range.
-The main function is `run_pipeline`, which takes a start date and end date as input, 
-fetches the relevant data, and uploads it to S3.
+This is the orchestration entry point. It runs the data pipeline in one of three modes:
+daily (fetch yesterday's SMARD/weather data plus the weekly weather forecast, then load
+into S3 and run dbt), weekly (retrain the ML models), or historical (backfill SMARD/weather
+data for a date range, load into S3, run dbt, and train the ML models).
 """
 
 import argparse
@@ -50,13 +50,13 @@ def parser():
                             "Daily collects yesterday data and today's forecast " \
                             "Weekly trains the ml models " \
                             "Historical collects data between given start and end date and train the ml models")
-    arg_parser.add_argument("--start_date", 
-                            type=str, 
-                            help="The start date in YYYY-MM-DD format. Required for full_backfill."
+    arg_parser.add_argument("--start_date",
+                            type=str,
+                            help="The start date in YYYY-MM-DD format. Required for historical mode."
                         )
-    arg_parser.add_argument("--end_date", 
-                            type=str, 
-                            help="The end date in YYYY-MM-DD format. Required for full_backfill."
+    arg_parser.add_argument("--end_date",
+                            type=str,
+                            help="The end date in YYYY-MM-DD format. Required for historical mode."
                         )
     return arg_parser.parse_args()
 
@@ -140,8 +140,15 @@ def run_historical_pipeline(start_date: datetime, end_date: datetime):
 def run_model_training():
     # Train generation models for wind and solar
     raw = load_ml_features()
-    start_generation_model_training(raw)
-    start_price_model_training(raw)
+    try:
+        start_generation_model_training(raw)
+    except Exception as e:
+        logger.error(f"Error is occured while training geenration model: {str(e)}")
+    
+    try:
+        start_price_model_training(raw)
+    except Exception as e:
+        logger.error(f"Error is occured while training price model: {str(e)}")
 
 # Run Daily
 def fetch_yesterday_data():
@@ -151,10 +158,15 @@ def fetch_yesterday_data():
     
     try:
         run_smard_single_day(start_date, end_date)
-        run_weather_single_day(start_date, end_date)
-        logger.info(f"Yesterday's data is fetched successfully (date: {yesterday.strftime('%Y-%m-%d')})")
     except Exception as e:
-        logger.error(f"Data for {yesterday.strftime('%Y-%m-%d')} cannot fetched: {e}")
+        logger.error(f"SMARD data for {yesterday.strftime('%Y-%m-%d')} cannot fetched: {e}")
+
+    try:
+        run_weather_single_day(start_date, end_date)
+    except Exception as e:
+        logger.error(f"Weather data for {yesterday.strftime('%Y-%m-%d')} cannot fetched: {e}")
+
+    logger.info(f"Yesterday's data fetch completed (date: {yesterday.strftime('%Y-%m-%d')})")
 
 def fetch_weekly_weather_forecast():
     current_day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
