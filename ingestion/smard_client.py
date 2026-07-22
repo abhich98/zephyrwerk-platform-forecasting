@@ -11,7 +11,9 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from functools import lru_cache
 from typing import Union
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import requests
@@ -96,10 +98,13 @@ SMARD_SIGNALS = {
 }
 
 
+@lru_cache(maxsize=None)
 def _get_index(filter_id: Union[ENERGY_SOURCE, CONSUMPTION_TYPE, NEIGHBORING_REGION], 
                region: REGION, 
                resolution: RESOLUTION) -> list:
-    """" Fetches the index of available timestamps for a given filter_id, region, and resolution.
+    """ Fetches the index of available timestamps for a given filter_id, region, and resolution.
+        Cached with lru_cache — the index rarely changes, so repeated calls within a single
+        pipeline run (e.g. backfill) hit the cache instead of re-fetching from SMARD.
         
     param: filter_id: The SMARD filter ID corresponding to the signal we want to fetch 
                     (e.g. 4067 for onshore wind generation).
@@ -163,14 +168,17 @@ def _fetch_range_single_signal(signal_name: Union[ENERGY_SOURCE, CONSUMPTION_TYP
                 end_date: datetime, 
                 region: REGION = REGION.DE,
                 unit: Units = Units.MW,
-                resolution: RESOLUTION = RESOLUTION.HOUR
+                resolution: RESOLUTION = RESOLUTION.HOUR,
+                chunk_workers: int = 8
                 ) -> pd.DataFrame:
     """ Fetches time series data for a given signal, date range, and resolution from the SMARD API.
+        Weekly chunks are fetched in parallel for speed.
     param: signal_name: The name of the signal to fetch. This can be an instance of 
             ENERGY_SOURCE, CONSUMPTION_TYPE, or NEIGHBORING_REGION.
     param: start_date: The start date of the desired date range (inclusive).
     param: end_date: The end date of the desired date range (inclusive).
     param: resolution: The desired data resolution (e.g. Resolution.HOUR). Default is Resolution.HOUR.
+    param: chunk_workers: Number of parallel workers for fetching weekly chunks. Default is 8.
     return: A pandas DataFrame containing the time series data for the specified signal, date range, and resolution. 
             The DataFrame has columns "timestamp" (as a timezone-aware datetime in UTC), 
                                         "value" (as a numeric value), 
@@ -198,22 +206,22 @@ def _fetch_range_single_signal(signal_name: Union[ENERGY_SOURCE, CONSUMPTION_TYP
     first_ts = before_start[-1] if before_start else valid_timestamps[0]
     relevant_timestamps = [ts for ts in valid_timestamps if first_ts <= ts <= end_timestamp]
 
-    # Fetch the series data for each relevant timestamp and aggregate into a DataFrame
-    data_frames = []
-    for ts in relevant_timestamps:
+    def _fetch_one_chunk(ts: int):
         series = _get_series_with_retry(filter_id, region, resolution, ts)
         if not series:
-            continue  # Skip if no data is returned for this timestamp
-
+            return None
         df = pd.DataFrame(series, columns=["timestamp_ms", "value"])
         df["timestamp"] = pd.to_datetime(df["timestamp_ms"], unit='ms', utc=True)
         df["value"] = pd.to_numeric(df["value"], errors='coerce')
         df.drop(columns=["timestamp_ms"], inplace=True)
-        
-        # order columns as desired and keep only timestamp and value for now, we'll add signal and unit later
-        df = df[["timestamp", "value"]]
-        
-        data_frames.append(df)
+        return df[["timestamp", "value"]]
+
+    # Fetch the series data for each relevant timestamp in parallel and aggregate into a DataFrame
+    data_frames = []
+    with ThreadPoolExecutor(max_workers=chunk_workers) as pool:
+        for df in pool.map(_fetch_one_chunk, relevant_timestamps):
+            if df is not None and not df.empty:
+                data_frames.append(df)
     
     if not data_frames:
         return pd.DataFrame(columns=["timestamp", "value", "signal", "unit"])
@@ -228,6 +236,48 @@ def _fetch_range_single_signal(signal_name: Union[ENERGY_SOURCE, CONSUMPTION_TYP
     filtered_df = df[start_mask & end_mask]
 
     return filtered_df
+
+
+def fetch_range_threaded(start_date: datetime, end_date: datetime, max_workers: int = 10) -> pd.DataFrame:
+    """ Fetches time series data for all the 23 smard signals inside the time range from the SMARD API.
+    param: start_date: The start date of the desired date range (inclusive).
+    param: end_date: The end date of the desired date range (inclusive).
+
+    return: A pandas DataFrame containing the time series data for the signals, date range. 
+            The DataFrame has columns "timestamp" (as a timezone-aware datetime in UTC), 
+                                        "value" (as a numeric value), 
+                                        "signal" (the name of the signal), 
+                                        "unit" (the unit of the values).
+    """
+    logger.info(f"Running threaded fetch_range with max_workers={max_workers}")
+
+    def _fetch_one(signal, signal_config):
+        try:
+            return _fetch_range_single_signal(
+                signal, start_date, end_date,
+                signal_config["region"], signal_config["unit"], RESOLUTION.HOUR,
+            )
+        except Exception as e:
+            logger.error(f"Failed to fetch signal {signal}: {e}")
+            return None
+
+    data_frames = []
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_fetch_one, sig, cfg): sig
+            for sig, cfg in SMARD_SIGNALS.items()
+        }
+        for fut in as_completed(futures):
+            df = fut.result()
+            if df is not None and not df.empty:
+                data_frames.append(df)
+
+    if not data_frames:
+        return pd.DataFrame(columns=["timestamp", "value", "signal", "unit"])
+
+    df = pd.concat(data_frames, ignore_index=True)
+    return df.sort_values("timestamp").reset_index(drop=True)
+
 
 def fetch_range(start_date: datetime, end_date: datetime):
     """ Fetches time series data for all the 23 smard signals inside the time range from the SMARD API.

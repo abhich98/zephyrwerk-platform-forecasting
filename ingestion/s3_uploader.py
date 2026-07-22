@@ -28,6 +28,23 @@ def is_already_uploaded(data_name: DATA_NAMES, year: int, month: int, day: int) 
     except Exception:
         return False
 
+
+def create_bucket_if_not_exists(bucket_name: str | None = None, endpoint_url: str | None = None):
+    """Creates an S3 bucket if it does not already exist."""
+    if bucket_name is None:
+        bucket_name = os.environ.get("ZEPHYRWERK_AWS_BUCKET_NAME")
+    if endpoint_url is None:
+        endpoint_url = os.environ.get("AWS_ENDPOINT_URL") or None
+
+    s3 = boto3.client('s3', endpoint_url=endpoint_url)
+    try:
+        s3.head_bucket(Bucket=bucket_name)
+        logger.info(f"Bucket '{bucket_name}' already exists.")
+    except Exception:
+        logger.info(f"Bucket '{bucket_name}' does not exist. Creating it now.")
+        s3.create_bucket(Bucket=bucket_name)
+
+
 def get_file_name(data_name: DATA_NAMES, year: int, month: int, day: int) -> str:
     """Generates a file name for the Parquet file based on the given year, month, and day. 
     The file name follows the format: "smard_{year}_{month}_{day}.parquet" and is stored 

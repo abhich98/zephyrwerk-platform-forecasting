@@ -198,15 +198,15 @@ Key variables:
 ### Start local infrastructure
 
 ```bash
-# LocalStack — S3 emulation. Pinned to 3.8: LocalStack 2026.x requires a
-# paid license for S3 (fails with exit code 55); 3.8 is the last free one.
-# Volume mount matters — the full historical backfill takes hours, and
-# without it a container restart loses everything.
-docker run --rm -d \
-  -p 4566:4566 \
-  -v localstack-data:/var/lib/localstack \
-  --name localstack \
-  localstack/localstack:3.8
+# LocalStack — S3 emulation. Moved away from localstack to minio.
+# localstack, including localstack:3.8, did not support persistence of S3 buckets across container restarts. MinIO is a better alternative for local S3 emulation.
+docker run -d \
+  -p 4566:9000 \
+  -v "$(pwd)/minio-data:/data" \
+  -e MINIO_ROOT_USER=zephyrwerk \
+  -e MINIO_ROOT_PASSWORD=zephyrwerk \
+  --name zephyrwerk-minio \
+  quay.io/minio/minio server /data --console-address ":9001"
 
 # PostgreSQL — mounts db/init.sql which creates raw, staging,
 # analytics schemas and all five raw tables (including weather_forecast)
