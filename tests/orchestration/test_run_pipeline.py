@@ -125,11 +125,12 @@ class TestFetchYesterdayData:
              patch("orchestration.run_pipeline.run_weather_single_day") as mock_weather:
             run_pipeline.fetch_yesterday_data()  # must not raise
 
-        # NOTE: documents current behavior — SMARD and weather still share one
-        # try/except here, so a SMARD failure prevents the weather fetch too.
-        # Narrower blast radius than before the restructure (forecast is no
-        # longer coupled to this at all — see TestRunDailyPipeline below).
-        mock_weather.assert_not_called()
+        # SMARD and weather each have their own try/except now, so a SMARD
+        # failure does not prevent the weather fetch from running.
+        weather_start, weather_end = mock_weather.call_args.args
+        assert weather_start.time() == time(0, 0, 0)
+        assert weather_end - weather_start == timedelta(days=1)
+        assert weather_start.date() == (datetime.now(timezone.utc) - timedelta(days=1)).date()
 
 
 # ── fetch_weekly_weather_forecast ────────────────────────────────────────────
@@ -195,7 +196,7 @@ class TestRunDailyPipeline:
         mock_dbt.assert_any_call("run")
         mock_dbt.assert_any_call("test")
         assert mock_forecast.call_count == 8  # forecast fetch unaffected by the SMARD failure
-        mock_weather.assert_not_called()  # still coupled to SMARD within fetch_yesterday_data
+        mock_weather.assert_called_once()  # weather fetch is now independent of SMARD within fetch_yesterday_data
 
 
 # ── run_historical_pipeline ──────────────────────────────────────────────────
