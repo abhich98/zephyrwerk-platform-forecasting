@@ -1,5 +1,6 @@
 SELECT
     g.timestamp,
+    g.resolution,
     g.wind_onshore_mw,
     g.wind_offshore_mw,
     g.solar_mw,
@@ -15,10 +16,6 @@ SELECT
     g.total_consumption_mw,
     g.residual_load_mw,
     mp.price_eur_mwh,
-    mp.price_7d_rolling_avg,
-    mp.price_24h_lag,
-    mp.price_48h_lag,
-    mp.price_168h_lag,
     ps.de_lu_price_eur_mwh,
     ps.austria_price_eur_mwh,
     ps.austria_spread_eur_mwh,
@@ -73,9 +70,11 @@ FROM
         JOIN
     {{ ref('fct_market_prices') }} AS mp
         ON g.timestamp = mp.timestamp
+        AND g.resolution = mp.resolution
         JOIN
     {{ ref('fct_price_spreads') }} AS ps
         ON g.timestamp = ps.timestamp
+        AND g.resolution = ps.resolution
         JOIN
     {{ ref('fct_weather_features') }} AS w
         ON g.timestamp = w.timestamp

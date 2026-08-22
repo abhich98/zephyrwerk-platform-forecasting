@@ -2,8 +2,7 @@ version: 2
 
 models:
   - name: dim_date
-    description: "Date dimension table covering 2019-01-01 to 2030-12-31. Includes season, weekend flag, 
-                  and German public holiday flag."
+    description: "Date dimension table covering 2019-01-01 to 2030-12-31. Includes season, weekend flag, and German public holiday flag."
     columns:
       - name: date_day
         description: "The date. Primary key."
@@ -87,15 +86,24 @@ models:
                 quote: false
   
   - name: fct_energy_generation
-    description: "Pivoted fact table of German electricity generation and consumption by 15-minute interval, 
-                  sourced from SMARD. One row per timestamp."
+    description: "Pivoted fact table of German electricity generation and consumption, sourced from SMARD. One row per timestamp and resolution."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - resolution
     
     columns:
       - name: timestamp
-        description: "Start of the hourly interval (UTC). Primary key."
+        description: "Start of the interval (UTC)."
         tests:
           - not_null
-          - unique
+
+      - name: resolution
+        description: "Data resolution of the interval (for example hour or quarter-hour)."
+        tests:
+          - not_null
 
       - name: wind_onshore_mw
         description: "Onshore wind generation in MW. Null when no data is reported for the interval."
@@ -143,46 +151,49 @@ models:
         description: "Residual load in MW (total consumption minus variable renewables). Null when no data is reported."
 
   - name: fct_market_prices
-    description: "Hourly German day-ahead electricity spot prices (EUR/MWh) from SMARD, enriched with rolling averages 
-                  and lagged price features for time-series analysis."
+    description: "German day-ahead electricity spot prices (EUR/MWh) from SMARD. One row per timestamp and resolution."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - resolution
 
     columns:
       - name: timestamp
-        description: "Start of the hourly interval (UTC). Primary key."
+        description: "Start of the interval (UTC)."
         tests:
           - not_null
-          - unique
+
+      - name: resolution
+        description: "Data resolution of the interval (for example hour or quarter-hour)."
+        tests:
+          - not_null
 
       - name: price_eur_mwh
-        description: "Day-ahead spot price in EUR/MWh for the given hour."
+        description: "Day-ahead spot price in EUR/MWh for the given interval."
         tests:
           - not_null
-
-      - name: price_7d_rolling_avg
-        description: "Rolling average of price_eur_mwh over the trailing 168 hours (7 days), 
-                      inclusive of the current row."
-        tests:
-          - not_null
-
-      - name: price_24h_lag
-        description: "price_eur_mwh from exactly 24 hours prior. Null for the first 24 rows."
-
-      - name: price_48h_lag
-        description: "price_eur_mwh from exactly 48 hours prior. Null for the first 48 rows."
-
-      - name: price_168h_lag
-        description: "price_eur_mwh from exactly 168 hours (7 days) prior. Null for the first 168 rows."
 
   - name: fct_price_spreads
-    description: "Pivoted fact table of hourly day-ahead electricity price spreads between Germany-Luxembourg (DE_LU)
-                  and eight neighbouring countries. One row per timestamp."
+    description: "Pivoted fact table of day-ahead electricity price spreads between Germany-Luxembourg (DE_LU) and eight neighbouring countries. One row per timestamp and resolution."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - resolution
 
     columns:
       - name: timestamp
-        description: "Start of the hourly interval (UTC). Primary key."
+        description: "Start of the interval (UTC)."
         tests:
           - not_null
-          - unique
+
+      - name: resolution
+        description: "Data resolution of the interval (for example hour or quarter-hour)."
+        tests:
+          - not_null
 
       - name: de_lu_price_eur_mwh
         description: "Day-ahead spot price in EUR/MWh for the Germany-Luxembourg zone (DE_LU)."
@@ -238,8 +249,7 @@ models:
         description: "Price spread in EUR/MWh (de_lu_price - denmark_2_price). Positive = DE_LU more expensive."
 
   - name: fct_weather_features
-    description: "Pivoted fact table of hourly weather signals at 100 m hub height and surface level,
-                  sourced from stg_weather. One row per timestamp, one column per signal-region combination."
+    description: "Pivoted fact table of hourly weather signals at 100 m hub height and surface level, sourced from stg_weather. One row per timestamp, one column per signal-region combination."
 
     columns:
       - name: timestamp
@@ -309,11 +319,7 @@ models:
         description: "Air temperature at 2 m above ground in °C for solar_region_bawue."
 
   - name: fct_weather_forecast_features
-    description: "Pivoted fact table of hourly forecasted weather signals at 100 m hub height and surface level,
-                  sourced from stg_weather_forecast, joined with calendar features from dim_date so the table
-                  is directly usable for future-dated ML inference. Deduplicated to the most recently fetched
-                  forecast (max fetched_at) per timestamp/region/signal. One row per timestamp, one column per
-                  signal-region combination."
+    description: "Pivoted fact table of hourly forecasted weather signals at 100 m hub height and surface level, sourced from stg_weather_forecast, joined with calendar features from dim_date so the table is directly usable for future-dated ML inference. Deduplicated to the most recently fetched forecast (max fetched_at) per timestamp/region/signal. One row per timestamp, one column per signal-region combination."
 
     columns:
       - name: timestamp
@@ -436,8 +442,7 @@ models:
           - not_null
 
   - name: fct_ml_features
-    description: "Wide feature table for ML model training and inference. Joins generation, market price, price spread,
-                  and weather fact tables on timestamp. One row per timestamp."
+    description: "Wide feature table for ML model training and inference. Joins generation, market price, price spread, and weather fact tables on timestamp. One row per timestamp."
 
     columns:
       - name: timestamp

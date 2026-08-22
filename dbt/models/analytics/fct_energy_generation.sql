@@ -1,6 +1,7 @@
 with generation_pivot as (
   select
     timestamp,
+    resolution,
     MAX(value) FILTER(WHERE signal_name = 'WIND_ONSHORE') as wind_onshore_mw,
     MAX(value) FILTER(WHERE signal_name = 'WIND_OFFSHORE') as wind_offshore_mw,
     MAX(value) FILTER(WHERE signal_name = 'SOLAR') as solar_mw,
@@ -16,7 +17,7 @@ with generation_pivot as (
     MAX(value) FILTER(WHERE signal_name = 'TOTAL_CONSUMPTION') as total_consumption_mw,
     MAX(value) FILTER(WHERE signal_name = 'RESIDUAL_LOAD') as residual_load_mw
   from {{ ref('stg_smard_generation') }}
-  group by timestamp
+  group by timestamp, resolution
 )
 
 select *

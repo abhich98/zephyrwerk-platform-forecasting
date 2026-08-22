@@ -3,7 +3,8 @@ WITH nan_to_null AS(
         timestamp::TIMESTAMP WITH TIME ZONE,
         signal AS signal_name,
         NULLIF(value, 'NaN')::numeric AS value,
-        unit
+        unit,
+        resolution
     FROM
         {{ source('raw', 'smard_generation') }}
 )

@@ -6,23 +6,30 @@ sources:
       - name: smard_generation
       - name: smard_prices
       - name: smard_neighbour_prices
+      - name: smard_forecast
       - name: weather
       - name: weather_forecast
+      - name: weather_forecast_history
 
 models:
   - name: stg_smard_generation
     description: "Cleaned generation signals from raw SMARD data.
-                NUCLEAR signal is coalesced to 0 for the end wind-down period
-                and excluded after retirement (2024-02-04 22:00 UTC)"
+                NUCLEAR signal is excluded after retirement (2023-04-15 00:00 UTC)"
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns:
               - timestamp
               - signal_name
+              - resolution
     columns:
       - name: timestamp
-        description: "UTC timestamp of the hourly observation."
+        description: "UTC timestamp of the observation interval."
+        tests:
+          - not_null
+
+      - name: resolution
+        description: "Source resolution of the observation (for example hour or quarter-hour)."
         tests:
           - not_null
 
@@ -57,13 +64,18 @@ models:
             combination_of_columns:
               - timestamp
               - signal_name
+              - resolution
 
     columns:
       - name: timestamp
-        description: "UTC timestamp of the hourly observation."
+        description: "UTC timestamp of the observation interval."
         tests:
           - not_null
-          - unique
+
+      - name: resolution
+        description: "Source resolution of the observation (for example hour or quarter-hour)."
+        tests:
+          - not_null
 
       - name: signal_name
         description: "Name of the price signal. Always 'DE_LU'."
@@ -94,10 +106,16 @@ models:
             combination_of_columns:
               - timestamp
               - signal_name
+              - resolution
 
     columns:
       - name: timestamp
-        description: "UTC timestamp of the hourly observation."
+        description: "UTC timestamp of the observation interval."
+        tests:
+          - not_null
+
+      - name: resolution
+        description: "Source resolution of the observation (for example hour or quarter-hour)."
         tests:
           - not_null
 
@@ -121,6 +139,52 @@ models:
           - accepted_values:
               arguments:
                 values: ['EUR_MWH']
+
+  - name: stg_smard_generation_forecast
+    description: "Cleaned forecasted generation signals for the day-ahead market horizon."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - signal_name
+              - resolution
+
+    columns:
+      - name: timestamp
+        description: "UTC timestamp of the forecasted observation."
+        tests:
+          - not_null
+
+      - name: issue_timestamp
+        description: "UTC timestamp when the forecast was issued."
+        tests:
+          - not_null
+
+      - name: signal_name
+        description: "Name of the forecasted generation signal."
+        tests:
+          - not_null
+
+      - name: value
+        description: "Forecasted generation output in MW. Non-negative."
+        tests:
+          - not_null
+
+      - name: unit
+        description: "Unit of measurement. Always MW for generation forecast signals."
+        tests:
+          - not_null
+
+      - name: resolution
+        description: "Forecast resolution (for example hourly)."
+        tests:
+          - not_null
+
+      - name: fetched_at
+        description: "UTC timestamp when this record was fetched from source."
+        tests:
+          - not_null
 
   - name: stg_weather
     description: "Cleaned weather information for 4 renewable energy regions."
@@ -176,11 +240,15 @@ models:
               - timestamp
               - region
               - signal_name
-              - fetched_at
 
     columns:
       - name: timestamp
         description: "UTC timestamp of the hourly observation."
+        tests:
+          - not_null
+
+      - name: issue_timestamp
+        description: "UTC timestamp when the forecast was issued."
         tests:
           - not_null
 
@@ -215,5 +283,57 @@ models:
 
       - name: fetched_at
         description: "UTC timestamp of the fetched operation"
+        tests:
+          - not_null
+
+  - name: stg_weather_forecast_history
+    description: "Historical weather forecasts used for leak-safe ML training and day-ahead feature generation."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - region
+              - signal_name
+              - model
+
+    columns:
+      - name: issue_timestamp
+        description: "UTC timestamp when the forecast was issued."
+        tests:
+          - not_null
+
+      - name: timestamp
+        description: "UTC timestamp for the forecasted hour."
+        tests:
+          - not_null
+
+      - name: region
+        description: "Name of the region from which weather data was collected."
+        tests:
+          - not_null
+
+      - name: signal_name
+        description: "Name of the weather signal."
+        tests:
+          - not_null
+
+      - name: value
+        description: "Weather measurement value for the forecasted hour."
+        tests:
+          - not_null
+
+      - name: unit
+        description: "Unit of the weather measurement."
+        tests:
+          - not_null
+
+      - name: model
+        description: "Weather model used to generate the forecast."
+        tests:
+          - not_null
+
+      - name: fetched_at
+        description: "UTC timestamp when this record was fetched from source."
         tests:
           - not_null

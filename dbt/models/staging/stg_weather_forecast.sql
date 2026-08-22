@@ -1,5 +1,6 @@
 SELECT
     timestamp :: TIMESTAMP WITH TIME ZONE,
+    issue_timestamp :: TIMESTAMP WITH TIME ZONE,
     region,
     signal_type AS signal_name,
     NULLIF(value, 'NaN') AS value,
