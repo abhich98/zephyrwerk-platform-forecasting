@@ -9,7 +9,6 @@ sources:
       - name: smard_forecast
       - name: weather
       - name: weather_forecast
-      - name: weather_forecast_history
 
 models:
   - name: stg_smard_generation

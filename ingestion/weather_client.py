@@ -21,7 +21,13 @@ from enum import Enum
 
 import pandas as pd
 import requests
-from tenacity import before_sleep_log, retry, retry_if_exception, stop_after_attempt, wait_exponential
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +37,11 @@ BASE_HISTORICAL_URL = os.getenv("ZEPHYRWERK_OPENMETEO_HISTORICAL_URL")
 # Forecast weather data
 BASE_FORECAST_URL = os.getenv("ZEPHYRWERK_OPENMETEO_FORECAST_URL")
 BASE_HISTORICAL_FORECAST_URL = os.getenv("ZEPHYRWERK_OPENMETEO_HISTORICAL_FORECAST_URL")
-BASE_SINGLE_RUNS_FORECAST_URL = os.getenv("ZEPHYRWERK_OPENMETEO_SINGLE_RUNS_FORECAST_URL")
+BASE_SINGLE_RUNS_FORECAST_URL = os.getenv(
+    "ZEPHYRWERK_OPENMETEO_SINGLE_RUNS_FORECAST_URL"
+)
 
-MAX_TIME_OUT = 30 # s
+MAX_TIME_OUT = 30  # s
 
 # ECMWF IFS Single Runs are available from March 2024. Before this date, fall
 # back to the Historical Forecast API (stitched icon_seamless) as a proxy.
@@ -46,12 +54,14 @@ ECMWF_SINGLE_RUNS_START_DATE = datetime(2024, 3, 14, tzinfo=timezone.utc)
 AUCTION_TIME_RUN_UTC = "00:00"
 AUCTION_TIME_RUN_FALLBACK_UTC = "06:00"
 
+
 class SignalType(Enum):
     WIND_SPEED = "wind_speed_100m"
     WIND_DIRECTION = "wind_direction_100m"
     SHORTWAVE_RADIATION = "shortwave_radiation"
     CLOUD_COVER = "cloud_cover"
     TEMPERATURE = "temperature_2m"
+
 
 class Region(Enum):
     BRANDENBURG = "wind_region_brandenburg"
@@ -64,14 +74,16 @@ REGION_COORDINATES = {
     Region.BRANDENBURG: {"latitude": 52.41, "longitude": 12.53},
     Region.SCHLESWIG: {"latitude": 54.51, "longitude": 9.55},
     Region.BAVARIA: {"latitude": 48.13, "longitude": 11.58},
-    Region.BADEN_WURTTEMBERG: {"latitude": 48.77, "longitude": 9.18}
+    Region.BADEN_WURTTEMBERG: {"latitude": 48.77, "longitude": 9.18},
 }
+
 
 def _is_retryable_http_error(exc: BaseException) -> bool:
     if not isinstance(exc, requests.HTTPError):
         return False
     status_code = exc.response.status_code
     return status_code == 429 or status_code >= 500
+
 
 @retry(
     retry=retry_if_exception(_is_retryable_http_error),
@@ -80,7 +92,9 @@ def _is_retryable_http_error(exc: BaseException) -> bool:
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-def _fetch_single_region_weather(region: Region, start_date: datetime, end_date: datetime, url: str) -> pd.DataFrame:
+def _fetch_single_region_weather(
+    region: Region, start_date: datetime, end_date: datetime, url: str
+) -> pd.DataFrame:
     """
     Fetch weather data for a single region from the Open-Meteo API.
 
@@ -90,11 +104,11 @@ def _fetch_single_region_weather(region: Region, start_date: datetime, end_date:
         end_date (datetime): The end date and time for the data retrieval.
         url (str): The API endpoint URL to use for the request.
     Returns:
-        pd.DataFrame: A DataFrame containing the requested weather data 
+        pd.DataFrame: A DataFrame containing the requested weather data
                     for the specified region with timestamps as the index.
     """
     coordinates = REGION_COORDINATES[region]
-    
+
     params = {
         "latitude": coordinates["latitude"],
         "longitude": coordinates["longitude"],
@@ -102,9 +116,9 @@ def _fetch_single_region_weather(region: Region, start_date: datetime, end_date:
         "end_date": end_date.strftime("%Y-%m-%d"),
         "hourly": [signal_type.value for signal_type in SignalType],
         "timezone": "UTC",
-        "utc_offset_seconds": 0
+        "utc_offset_seconds": 0,
     }
-    
+
     response = requests.get(url, params=params, timeout=MAX_TIME_OUT)
     response.raise_for_status()
 
@@ -115,10 +129,10 @@ def _fetch_single_region_weather(region: Region, start_date: datetime, end_date:
     df["timestamp"] = pd.to_datetime(df["time"], utc=True)
     df = df.drop(columns=["time"])
     df = df.melt(id_vars=["timestamp"], var_name="signal_type", value_name="value")
-    df["region"] = region.value 
+    df["region"] = region.value
     df["unit"] = df["signal_type"].map(data["hourly_units"])
     return df[["timestamp", "region", "signal_type", "value", "unit"]]
-    
+
 
 def fetch_historical_weather(start_date: datetime, end_date: datetime) -> pd.DataFrame:
     """
@@ -132,8 +146,10 @@ def fetch_historical_weather(start_date: datetime, end_date: datetime) -> pd.Dat
     """
     results = []
     for region in Region:
-        df = _fetch_single_region_weather(region, start_date, end_date, BASE_HISTORICAL_URL)
-    
+        df = _fetch_single_region_weather(
+            region, start_date, end_date, BASE_HISTORICAL_URL
+        )
+
         if not df.empty:
             results.append(df)
 
@@ -152,8 +168,10 @@ def fetch_forecast_weather(start_date: datetime, end_date: datetime) -> pd.DataF
     """
     results = []
     for region in Region:
-        df = _fetch_single_region_weather(region, start_date, end_date, BASE_FORECAST_URL)
-        
+        df = _fetch_single_region_weather(
+            region, start_date, end_date, BASE_FORECAST_URL
+        )
+
         if not df.empty:
             fetched_at = datetime.now(timezone.utc)
             df["fetched_at"] = fetched_at
@@ -174,7 +192,10 @@ def fetch_forecast_weather(start_date: datetime, end_date: datetime) -> pd.DataF
 #   - Mar 2024 – present: ECMWF IFS Single Runs (run=YYYY-MM-DDT00:00).
 #     Strict auction-time, no leak. Consistent model for train + inference.
 
-def _fetch_forecast_stitched(region: Region, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+
+def _fetch_forecast_stitched(
+    region: Region, start_date: datetime, end_date: datetime
+) -> pd.DataFrame:
     """Fetch stitched historical forecast (icon_seamless) from the Historical Forecast API.
 
     This is a fallback for the ECMWF IFS Single Runs API, which is only available from March 2024. This is a continuous hourly timeseries built by stitching the first hours of
@@ -183,7 +204,9 @@ def _fetch_forecast_stitched(region: Region, start_date: datetime, end_date: dat
 
     Returns a DataFrame with columns: issue_timestamp, timestamp, region, signal_type, value, unit, model.
     """
-    print(f"Fetching stitched historical forecast for {region.value} from {start_date.date()} to {end_date.date()}")
+    print(
+        f"Fetching stitched historical forecast for {region.value} from {start_date.date()} to {end_date.date()}"
+    )
 
     coordinates = REGION_COORDINATES[region]
     params = {
@@ -196,7 +219,9 @@ def _fetch_forecast_stitched(region: Region, start_date: datetime, end_date: dat
         "utc_offset_seconds": 0,
         "models": "icon_seamless",
     }
-    response = requests.get(BASE_HISTORICAL_FORECAST_URL, params=params, timeout=MAX_TIME_OUT)
+    response = requests.get(
+        BASE_HISTORICAL_FORECAST_URL, params=params, timeout=MAX_TIME_OUT
+    )
     response.raise_for_status()
     data = response.json()
 
@@ -211,7 +236,17 @@ def _fetch_forecast_stitched(region: Region, start_date: datetime, end_date: dat
     # nominal lead time. This column is informational; the stitched model doesn't
     # have a single issue_timestamp per target hour.
     df["issue_timestamp"] = df["timestamp"] - pd.Timedelta(hours=18)
-    return df[["issue_timestamp", "timestamp", "region", "signal_type", "value", "unit", "model"]]
+    return df[
+        [
+            "issue_timestamp",
+            "timestamp",
+            "region",
+            "signal_type",
+            "value",
+            "unit",
+            "model",
+        ]
+    ]
 
 
 @retry(
@@ -221,7 +256,9 @@ def _fetch_forecast_stitched(region: Region, start_date: datetime, end_date: dat
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-def _fetch_single_run(region: Region, run_time: datetime, forecast_days: int = 2) -> pd.DataFrame:
+def _fetch_single_run(
+    region: Region, run_time: datetime, forecast_days: int = 2
+) -> pd.DataFrame:
     """Fetch a single ECMWF IFS model run from the Single Runs API.
 
     Args:
@@ -231,7 +268,9 @@ def _fetch_single_run(region: Region, run_time: datetime, forecast_days: int = 2
 
     Returns a DataFrame with columns: issue_timestamp, timestamp, region, signal_type, value, unit, model.
     """
-    assert run_time.tzinfo is not None and run_time.tzinfo.utcoffset(run_time) == timedelta(0), "run_time must be UTC"
+    assert run_time.tzinfo is not None and run_time.tzinfo.utcoffset(
+        run_time
+    ) == timedelta(0), "run_time must be UTC"
 
     # print(f"Fetching ECMWF IFS Single Run for {region.value} at {run_time.isoformat()} for {forecast_days} days")
 
@@ -246,7 +285,9 @@ def _fetch_single_run(region: Region, run_time: datetime, forecast_days: int = 2
         "timezone": "GMT",
         "models": "ecmwf_ifs",
     }
-    response = requests.get(BASE_SINGLE_RUNS_FORECAST_URL, params=params, timeout=MAX_TIME_OUT)
+    response = requests.get(
+        BASE_SINGLE_RUNS_FORECAST_URL, params=params, timeout=MAX_TIME_OUT
+    )
     response.raise_for_status()
     data = response.json()
 
@@ -258,10 +299,22 @@ def _fetch_single_run(region: Region, run_time: datetime, forecast_days: int = 2
     df["unit"] = df["signal_type"].map(data["hourly_units"])
     df["model"] = "ecmwf_ifs"
     df["issue_timestamp"] = pd.Timestamp(run_time)
-    return df[["issue_timestamp", "timestamp", "region", "signal_type", "value", "unit", "model"]]
+    return df[
+        [
+            "issue_timestamp",
+            "timestamp",
+            "region",
+            "signal_type",
+            "value",
+            "unit",
+            "model",
+        ]
+    ]
 
 
-def fetch_forecast_for_day(target_date: datetime, run_utc_hour: int = 0) -> pd.DataFrame:
+def fetch_forecast_for_day(
+    target_date: datetime, run_utc_hour: int = 0
+) -> pd.DataFrame:
     """Fetch the auction-time weather forecast for a single target day D.
 
     Uses the hybrid approach:
@@ -283,7 +336,9 @@ def fetch_forecast_for_day(target_date: datetime, run_utc_hour: int = 0) -> pd.D
 
     if issue_date >= ECMWF_SINGLE_RUNS_START_DATE:
         # Strict auction-time: ECMWF IFS Single Run at 00:00 UTC on D-1.
-        run_time = issue_date.replace(hour=run_utc_hour, minute=0, second=0, microsecond=0)
+        run_time = issue_date.replace(
+            hour=run_utc_hour, minute=0, second=0, microsecond=0
+        )
         results = []
         for region in Region:
             df = _fetch_single_run(region, run_time, forecast_days=2)
@@ -295,7 +350,18 @@ def fetch_forecast_for_day(target_date: datetime, run_utc_hour: int = 0) -> pd.D
         if results:
             return pd.concat(results, ignore_index=True)
         else:
-            return pd.DataFrame(columns=["issue_timestamp", "timestamp", "region", "signal_type", "value", "unit", "model", "fetched_at"])
+            return pd.DataFrame(
+                columns=[
+                    "issue_timestamp",
+                    "timestamp",
+                    "region",
+                    "signal_type",
+                    "value",
+                    "unit",
+                    "model",
+                    "fetched_at",
+                ]
+            )
     else:
         # Proxy: stitched icon_seamless. Fetch a 2-day window and filter to D.
         results = []
@@ -308,10 +374,23 @@ def fetch_forecast_for_day(target_date: datetime, run_utc_hour: int = 0) -> pd.D
         if results:
             return pd.concat(results, ignore_index=True)
         else:
-            return pd.DataFrame(columns=["issue_timestamp", "timestamp", "region", "signal_type", "value", "unit", "model", "fetched_at"])
+            return pd.DataFrame(
+                columns=[
+                    "issue_timestamp",
+                    "timestamp",
+                    "region",
+                    "signal_type",
+                    "value",
+                    "unit",
+                    "model",
+                    "fetched_at",
+                ]
+            )
 
 
-def fetch_forecast_weather_2(start_date: datetime, end_date: datetime, run_utc_hour: int = 0) -> pd.DataFrame:
+def fetch_forecast_weather_2(
+    start_date: datetime, end_date: datetime, run_utc_hour: int = 0
+) -> pd.DataFrame:
     """Fetch auction-time weather forecasts for a range of target (historical or current) days.
 
     Iterates day-by-day, calling fetch_forecast_for_day for each.
@@ -338,13 +417,25 @@ def fetch_forecast_weather_2(start_date: datetime, end_date: datetime, run_utc_h
             df = fetch_forecast_for_day(current, run_utc_hour=run_utc_hour)
             if not df.empty:
                 results.append(df)
-                logger.info(f"Fetched weather forecast for {current.date()} ({len(df)} rows)")
+                logger.info(
+                    f"Fetched weather forecast for {current.date()} ({len(df)} rows)"
+                )
         except Exception as e:
             logger.error(f"Failed to fetch weather forecast for {current.date()}: {e}")
         current += timedelta(days=1)
 
     if not results:
-        return pd.DataFrame(columns=["issue_timestamp", "timestamp", "region", "signal_type", "value", "unit", "model"])
+        return pd.DataFrame(
+            columns=[
+                "issue_timestamp",
+                "timestamp",
+                "region",
+                "signal_type",
+                "value",
+                "unit",
+                "model",
+            ]
+        )
     return pd.concat(results, ignore_index=True)
 
 
@@ -377,4 +468,3 @@ if __name__ == "__main__":
     print(df["timestamp"].min())
     print(df["timestamp"].max())
     print(df["value"].isna().sum())
-    

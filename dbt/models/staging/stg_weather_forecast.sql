@@ -5,6 +5,7 @@ SELECT
     signal_type AS signal_name,
     NULLIF(value, 'NaN') AS value,
     unit,
+    model,
     fetched_at :: TIMESTAMP WITH TIME ZONE
 FROM
     {{ source('raw', 'weather_forecast') }}

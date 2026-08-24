@@ -1,3 +1,5 @@
+-- REDUNDANT: TO BE REMOVED SOON.
+
 -- Historical weather forecasts for ML training (leak-safe).
 -- These are the forecasts that were actually available at auction time
 -- (12:00 CET on D-1), NOT ERA5 actuals. Used to replace the leaky ERA5 join
@@ -16,6 +18,6 @@ SELECT
     model,
     fetched_at :: TIMESTAMP WITH TIME ZONE
 FROM
-    {{ source('raw', 'weather_forecast_history') }}
+    {{ source('raw', 'weather_forecast') }}
 WHERE
     value IS NOT NULL
