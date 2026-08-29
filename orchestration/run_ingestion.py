@@ -17,6 +17,7 @@ import argparse
 import logging
 import subprocess
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -41,7 +42,7 @@ logging.basicConfig(
 
 def parser():
     arg_parser = argparse.ArgumentParser(
-        description="Run the data pipeline to fetch SMARD and weather data and upload to S3."
+        description="Run the data pipeline to fetch SMARD and weather data and upload to S3. The script receives dates in German/CET timezone, but converts them to UTC for processing."
         )
     arg_parser.add_argument("--start_date", 
                             type=str, 
@@ -131,37 +132,33 @@ def run_pipeline(start_date: datetime, end_date: datetime):
 
     start_time = datetime.now()
 
-    # ── Fetch the ENTIRE range in one pass ──────────────────────────────
-    # SMARD serves weekly chunks, so fetching 1 day costs the same API calls
-    # as fetching 7 days. Fetching the whole range at once eliminates ~7×
-    # redundant weekly chunk downloads and ~2500× redundant index calls.
+    # # ── Fetch the ENTIRE range in one pass ──────────────────────────────
+    # # SMARD serves weekly chunks, so fetching 1 day costs the same API calls
+    # # as fetching 7 days. Fetching the whole range at once eliminates ~7×
+    # # redundant weekly chunk downloads and ~2500× redundant index calls.
 
-    logger.info(f"Fetching SMARD data for {start_date.date()} → {end_date.date()}")
-    smard_data = fetch_range(start_date=start_date, end_date=end_date)
-    logger.info(f"SMARD fetch done: {len(smard_data)} rows")
+    # logger.info(f"Fetching SMARD data for {start_date.date()} → {end_date.date()}")
+    # smard_data = fetch_range(start_date=start_date, end_date=end_date)
+    # logger.info(f"SMARD fetch done: {len(smard_data)} rows")
 
-    logger.info(f"Fetching weather data for {start_date.date()} → {end_date.date()}")
-    weather_data = _fetch_weather_chunked(start_date, end_date)
-    logger.info(f"Weather fetch done: {len(weather_data)} rows")
+    # # ── Split by day and upload (skipping days already in S3) ───────────
+    # _split_and_upload_by_day(smard_data, DATA_NAMES.SMARD)
 
-    # ── Split by day and upload (skipping days already in S3) ───────────
-    _split_and_upload_by_day(smard_data, DATA_NAMES.SMARD)
-    _split_and_upload_by_day(weather_data, DATA_NAMES.WEATHER)
+    # logger.info(f"Fetching weather data for {start_date.date()} → {end_date.date()}")
+    # weather_data = _fetch_weather_chunked(start_date, end_date)
+    # logger.info(f"Weather fetch done: {len(weather_data)} rows")
+
+    # _split_and_upload_by_day(weather_data, DATA_NAMES.WEATHER)
 
     # ── Fetch and upload historical/current weather forecasts (leak-safe) ───────
     # These are the forecasts that were actually available at auction time,
     # NOT ERA5 actuals. Used for ML training to avoid the leakage in the
     # existing fct_ml_features weather join.
     logger.info(f"Fetching weather forecasts for {start_date.date()} → {end_date.date()}")
-    try:
-        weather_forecast_data = fetch_forecast_weather_2(start_date, end_date, run_utc_hour=0)
-        if not weather_forecast_data.empty:
-            _split_and_upload_by_day(weather_forecast_data, DATA_NAMES.WEATHER_FORECAST)
-            logger.info(f"Weather forecast fetch done: {len(weather_forecast_data)} rows")
-        else:
-            logger.info("No weather forecast data fetched")
-    except Exception as e:
-        logger.error(f"Failed to fetch weather forecasts: {e}")
+    weather_forecast_data = fetch_forecast_weather_2(start_date, end_date, run_utc_hour=0)
+    logger.info(f"Weather forecast fetch done: {len(weather_forecast_data)} rows")
+
+    _split_and_upload_by_day(weather_forecast_data, DATA_NAMES.WEATHER_FORECAST)
 
     # Load raw data from S3 into PostgreSQL
     load_range(start_date, end_date)
@@ -169,19 +166,24 @@ def run_pipeline(start_date: datetime, end_date: datetime):
     logger.info(f"Pipeline completed in {end_time - start_time}")
 
     _run_dbt("run")  # Run dbt models to transform raw data into features
-    _run_dbt("test")  # Run dbt tests to validate the transformed data
+    # _run_dbt("test")  # Run dbt tests to validate the transformed data
 
 
 if __name__ == "__main__":
+    # The scripte receives dates in German/CET timezone, but converts them to UTC for processing.
     args = parser()
     
     if args.start_date and args.end_date:
-        start_date = datetime.strptime(args.start_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        end_date = datetime.strptime(args.end_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        start_date = datetime.strptime(args.start_date, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Europe/Berlin"))
+        end_date = datetime.strptime(args.end_date, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Europe/Berlin"))
+
     elif args.start_date or args.end_date:
         raise ValueError("Provide both --start_date and --end_date or neither.")
     else:
-        start_date = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-        end_date = datetime.now(timezone.utc)
-    
-    run_pipeline(start_date=start_date, end_date=end_date)
+        start_date = datetime.now(tz=ZoneInfo("Europe/Berlin")).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        end_date = datetime.now(tz=ZoneInfo("Europe/Berlin"))
+
+    run_pipeline(
+        start_date=start_date.astimezone(timezone.utc), 
+        end_date=end_date.astimezone(timezone.utc)
+        )

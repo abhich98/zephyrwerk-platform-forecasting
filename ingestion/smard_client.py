@@ -327,17 +327,17 @@ def _fetch_range_single_signal(
     df["signal"] = signal_name.name
     df["unit"] = unit.value
 
-    # Filter the final DataFrame to ensure it only contains data within the specified date range
-    start_mask = df["timestamp"] >= pd.Timestamp(start_date).tz_convert("UTC")
-    end_mask = df["timestamp"] <= pd.Timestamp(end_date).tz_convert("UTC")
-    filtered_df = df[start_mask & end_mask]
-
     # For forecasted signals, build issue timestamps and add fetched_at column
     is_forecast_signal = isinstance(signal_name, FORECAST_SIGNAL)
 
     if is_forecast_signal:
         df["issue_timestamp"] = _build_issue_timestamps(signal_name, df["timestamp"])
         df["fetched_at"] = pd.Timestamp.now(tz="UTC")
+
+    # Filter the final DataFrame to ensure it only contains data within the specified date range
+    start_mask = df["timestamp"] >= pd.Timestamp(start_date).tz_convert("UTC")
+    end_mask = df["timestamp"] <= pd.Timestamp(end_date).tz_convert("UTC")
+    filtered_df = df[start_mask & end_mask]
 
     return filtered_df
 

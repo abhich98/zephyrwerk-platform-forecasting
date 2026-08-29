@@ -16,11 +16,16 @@ Three data sources are supported:
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Any, cast
 
+import openmeteo_requests
 import pandas as pd
 import requests
+import requests_cache
+from retry_requests import retry as retry_requests
 from tenacity import (
     before_sleep_log,
     retry,
@@ -30,6 +35,10 @@ from tenacity import (
 )
 
 logger = logging.getLogger(__name__)
+
+cache_session = requests_cache.CachedSession(".cache", expire_after=3600)
+retry_session = retry_requests(cache_session, retries=5, backoff_factor=0.2)
+openmeteo = openmeteo_requests.Client(session=cast(Any, retry_session))
 
 # Actual weather data
 BASE_HISTORICAL_URL = os.getenv("ZEPHYRWERK_OPENMETEO_HISTORICAL_URL")
@@ -77,12 +86,54 @@ REGION_COORDINATES = {
     Region.BADEN_WURTTEMBERG: {"latitude": 48.77, "longitude": 9.18},
 }
 
+SIGNAL_UNITS = {
+    SignalType.WIND_SPEED: "km/h",
+    SignalType.WIND_DIRECTION: "°",
+    SignalType.SHORTWAVE_RADIATION: "W/m²",
+    SignalType.CLOUD_COVER: "%",
+    SignalType.TEMPERATURE: "°C",
+}
+
 
 def _is_retryable_http_error(exc: BaseException) -> bool:
-    if not isinstance(exc, requests.HTTPError):
-        return False
-    status_code = exc.response.status_code
-    return status_code == 429 or status_code >= 500
+    if isinstance(exc, requests.HTTPError):
+        status_code = exc.response.status_code if exc.response is not None else None
+        return status_code == 429 or (status_code is not None and status_code >= 500)
+    return isinstance(exc, (requests.ConnectionError, requests.Timeout, RuntimeError))
+
+
+def _extract_timed_dataframe(response, region: Region, resolution: str = "hourly", model: str | None = None) -> pd.DataFrame:
+    if resolution == "hourly":
+        timed_data = response.Hourly()
+    elif resolution == "minutely_15":
+        timed_data = response.Minutely15()
+    else:
+        raise ValueError(f"Unsupported resolution: {resolution}")
+
+    timestamps = pd.date_range(
+        start=pd.to_datetime(timed_data.Time(), unit="s", utc=True),
+        end=pd.to_datetime(timed_data.TimeEnd(), unit="s", utc=True),
+        freq=pd.Timedelta(seconds=timed_data.Interval()),
+        inclusive="left",
+    )
+
+    frames = []
+    for index, signal_type in enumerate(SignalType):
+        values = timed_data.Variables(index).ValuesAsNumpy()
+        signal_df = pd.DataFrame(
+            {
+                "timestamp": timestamps,
+                "region": region.value,
+                "signal_type": signal_type.value,
+                "value": values,
+                "unit": SIGNAL_UNITS[signal_type],
+            }
+        )
+        if model is not None:
+            signal_df["model"] = model
+        frames.append(signal_df)
+
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 @retry(
@@ -119,19 +170,13 @@ def _fetch_single_region_weather(
         "utc_offset_seconds": 0,
     }
 
-    response = requests.get(url, params=params, timeout=MAX_TIME_OUT)
-    response.raise_for_status()
+    responses = openmeteo.weather_api(url, params=params)
+    if not responses:
+        raise RuntimeError("No weather response returned by Open-Meteo")
 
-    data = response.json()
-
-    # Convert the data to a DataFrame as (timestap, region, signal_type, value, unit)
-    df = pd.DataFrame(data["hourly"])
-    df["timestamp"] = pd.to_datetime(df["time"], utc=True)
-    df = df.drop(columns=["time"])
-    df = df.melt(id_vars=["timestamp"], var_name="signal_type", value_name="value")
-    df["region"] = region.value
-    df["unit"] = df["signal_type"].map(data["hourly_units"])
-    return df[["timestamp", "region", "signal_type", "value", "unit"]]
+    return _extract_timed_dataframe(responses[0], region)[
+        ["timestamp", "region", "signal_type", "value", "unit"]
+    ]
 
 
 def fetch_historical_weather(start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -204,7 +249,7 @@ def _fetch_forecast_stitched(
 
     Returns a DataFrame with columns: issue_timestamp, timestamp, region, signal_type, value, unit, model.
     """
-    print(
+    logger.info(
         f"Fetching stitched historical forecast for {region.value} from {start_date.date()} to {end_date.date()}"
     )
 
@@ -214,24 +259,16 @@ def _fetch_forecast_stitched(
         "longitude": coordinates["longitude"],
         "start_date": start_date.strftime("%Y-%m-%d"),
         "end_date": end_date.strftime("%Y-%m-%d"),
-        "hourly": [s.value for s in SignalType],
+        "minutely_15": ",".join([s.value for s in SignalType]),
         "timezone": "UTC",
         "utc_offset_seconds": 0,
         "models": "icon_seamless",
     }
-    response = requests.get(
-        BASE_HISTORICAL_FORECAST_URL, params=params, timeout=MAX_TIME_OUT
-    )
-    response.raise_for_status()
-    data = response.json()
+    responses = openmeteo.weather_api(BASE_HISTORICAL_FORECAST_URL, params=params)
+    if not responses:
+        raise RuntimeError("No stitched forecast response returned by Open-Meteo")
 
-    df = pd.DataFrame(data["hourly"])
-    df["timestamp"] = pd.to_datetime(df["time"], utc=True)
-    df = df.drop(columns=["time"])
-    df = df.melt(id_vars=["timestamp"], var_name="signal_type", value_name="value")
-    df["region"] = region.value
-    df["unit"] = df["signal_type"].map(data["hourly_units"])
-    df["model"] = "icon_seamless"
+    df = _extract_timed_dataframe(responses[0], region, resolution="minutely_15", model="icon_seamless")
     # issue_timestamp is approximate for stitched data — use the target hour minus a
     # nominal lead time. This column is informational; the stitched model doesn't
     # have a single issue_timestamp per target hour.
@@ -281,23 +318,15 @@ def _fetch_single_run(
         "longitude": coordinates["longitude"],
         "run": run_str,
         "forecast_days": forecast_days,
-        "hourly": [s.value for s in SignalType],
+        "minutely_15": ",".join([s.value for s in SignalType]),
         "timezone": "GMT",
         "models": "ecmwf_ifs",
     }
-    response = requests.get(
-        BASE_SINGLE_RUNS_FORECAST_URL, params=params, timeout=MAX_TIME_OUT
-    )
-    response.raise_for_status()
-    data = response.json()
+    responses = openmeteo.weather_api(BASE_SINGLE_RUNS_FORECAST_URL, params=params)
+    if not responses:
+        raise RuntimeError("No single-runs forecast response returned by Open-Meteo")
 
-    df = pd.DataFrame(data["hourly"])
-    df["timestamp"] = pd.to_datetime(df["time"], utc=True)
-    df = df.drop(columns=["time"])
-    df = df.melt(id_vars=["timestamp"], var_name="signal_type", value_name="value")
-    df["region"] = region.value
-    df["unit"] = df["signal_type"].map(data["hourly_units"])
-    df["model"] = "ecmwf_ifs"
+    df = _extract_timed_dataframe(responses[0], region, resolution="minutely_15", model="ecmwf_ifs")
     df["issue_timestamp"] = pd.Timestamp(run_time)
     return df[
         [
@@ -393,9 +422,8 @@ def fetch_forecast_weather_2(
 ) -> pd.DataFrame:
     """Fetch auction-time weather forecasts for a range of target (historical or current) days.
 
-    Iterates day-by-day, calling fetch_forecast_for_day for each.
-    This is slower than a bulk fetch but necessary because Single Runs are
-    queried per-run (one API call per region per day).
+    Fetches each day independently in parallel, while keeping the total number of
+    concurrent workers low enough to avoid overloading the Open-Meteo API.
 
     Args:
         start_date: The first target day D (inclusive).
@@ -410,19 +438,57 @@ def fetch_forecast_weather_2(
     if end_date.tzinfo is None:
         end_date = end_date.replace(tzinfo=timezone.utc)
 
-    results = []
+    days = []
     current = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
     while current <= end_date:
+        days.append(current)
+        current += timedelta(days=1)
+
+    if not days:
+        return pd.DataFrame(
+            columns=[
+                "issue_timestamp",
+                "timestamp",
+                "region",
+                "signal_type",
+                "value",
+                "unit",
+                "model",
+            ]
+        )
+
+    results: list[pd.DataFrame] = []
+    max_workers = min(4, len(days))
+
+    def _fetch_day(day: datetime) -> pd.DataFrame:
         try:
-            df = fetch_forecast_for_day(current, run_utc_hour=run_utc_hour)
+            df = fetch_forecast_for_day(day, run_utc_hour=run_utc_hour)
+            if not df.empty:
+                logger.info(
+                    f"Fetched weather forecast for {day.date()} ({len(df)} rows)"
+                )
+            return df
+        except Exception as e:
+            logger.error(f"Failed to fetch weather forecast for {day.date()}: {e}")
+            return pd.DataFrame(
+                columns=[
+                    "issue_timestamp",
+                    "timestamp",
+                    "region",
+                    "signal_type",
+                    "value",
+                    "unit",
+                    "model",
+                    "fetched_at",
+                ]
+            )
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch_day, day): day for day in days}
+        for future in as_completed(futures):
+            df = future.result()
             if not df.empty:
                 results.append(df)
-                logger.info(
-                    f"Fetched weather forecast for {current.date()} ({len(df)} rows)"
-                )
-        except Exception as e:
-            logger.error(f"Failed to fetch weather forecast for {current.date()}: {e}")
-        current += timedelta(days=1)
 
     if not results:
         return pd.DataFrame(
@@ -441,15 +507,18 @@ def fetch_forecast_weather_2(
 
 if __name__ == "__main__":
     start = datetime.now(timezone.utc) - timedelta(days=3)
+    start = datetime(2023, 1, 1, tzinfo=timezone.utc)
     end = datetime.now(timezone.utc) - timedelta(days=1)
-    df = fetch_forecast_weather(start, end)
-    print(df.head(10))
-    print(f"Total rows: {len(df)}")
-    print(f"Regions: {df['region'].unique()}")
-    print(f"Signals: {df['signal_type'].unique()}")
-    print(df["timestamp"].min())
-    print(df["timestamp"].max())
-    print(df["value"].isna().sum())
+    end = datetime(2023, 1, 15, tzinfo=timezone.utc)
+
+    # df = fetch_forecast_weather(start, end)
+    # print(df.head(10))
+    # print(f"Total rows: {len(df)}")
+    # print(f"Regions: {df['region'].unique()}")
+    # print(f"Signals: {df['signal_type'].unique()}")
+    # print(df["timestamp"].min())
+    # print(df["timestamp"].max())
+    # print(df["value"].isna().sum())
 
     df = fetch_forecast_weather_2(start, end)
     print(df.head(10))

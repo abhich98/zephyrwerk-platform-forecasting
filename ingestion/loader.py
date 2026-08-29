@@ -146,10 +146,7 @@ def _load_smard_day(conn, fs, date: datetime) -> None:
             continue
 
         cols = ["timestamp", "signal", "value", "unit", "resolution"]
-        # Backfill resolution for legacy parquet files that lack the column
-        if "resolution" not in table_df.columns:
-            table_df = table_df.copy()
-            table_df["resolution"] = RESOLUTION.HOUR.value
+
         rows = list(table_df[cols].itertuples(index=False, name=None))
 
         insert_sql = (
@@ -181,17 +178,6 @@ def _load_smard_day(conn, fs, date: datetime) -> None:
             "resolution",
             "fetched_at",
         ]
-        if "issue_timestamp" not in forecast_df.columns:
-            forecast_df = forecast_df.copy()
-            forecast_df["issue_timestamp"] = (
-                forecast_df["timestamp"] - pd.Timedelta(days=1)
-            ).dt.floor("h")
-        if "fetched_at" not in forecast_df.columns:
-            forecast_df = forecast_df.copy()
-            forecast_df["fetched_at"] = pd.Timestamp.now(tz="UTC")
-        if "resolution" not in forecast_df.columns:
-            forecast_df = forecast_df.copy()
-            forecast_df["resolution"] = RESOLUTION.HOUR.value
 
         forecast_rows = list(
             forecast_df[forecast_cols].itertuples(index=False, name=None)
@@ -263,9 +249,13 @@ def _load_weather_forecast_day(conn, fs, date: datetime) -> None:
     ]
     rows = list(df[cols].itertuples(index=False, name=None))
 
-    insert_sql = f"INSERT INTO raw.weather_forecast ({','.join(cols)}) VALUES %s\
+    insert_sql = f"INSERT INTO raw.weather_forecast ({','.join(cols)}) VALUES %s \
             ON CONFLICT (timestamp, region, signal_type) \
-            DO UPDATE SET issue_timestamp = EXCLUDED.issue_timestamp, value = EXCLUDED.value, unit = EXCLUDED.unit, model = EXCLUDED.model, fetched_at = EXCLUDED.fetched_at"
+            DO UPDATE SET \
+            issue_timestamp = EXCLUDED.issue_timestamp, \
+            value = EXCLUDED.value, unit = EXCLUDED.unit, \
+            model = EXCLUDED.model, \
+            fetched_at = EXCLUDED.fetched_at"
 
     with conn.cursor() as cur:
         try:
