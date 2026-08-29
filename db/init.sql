@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS raw.smard_neighbour_prices(
     UNIQUE(timestamp, signal, resolution)
 );
 
--- SMARD forecasted signals (filters 122, 123, 125, 3791, 5097).
+-- SMARD forecasted signals (filters 122, 123, 125, 3791, ...).
 CREATE TABLE IF NOT EXISTS raw.smard_forecast(
     issue_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
     timestamp TIMESTAMP WITH TIME ZONE NOT NULL,

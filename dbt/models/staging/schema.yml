@@ -231,7 +231,7 @@ models:
                 values: ["%","°","°C","km/h","W/m²"]
 
   - name: stg_weather_forecast
-    description: "Cleaned weather forecast information for 4 renewable energy regions."
+    description: "Cleaned (history and current) weather forecast information for 4 renewable energy regions."
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -282,57 +282,5 @@ models:
 
       - name: fetched_at
         description: "UTC timestamp of the fetched operation"
-        tests:
-          - not_null
-
-  - name: stg_weather_forecast_history
-    description: "Historical weather forecasts used for leak-safe ML training and day-ahead feature generation."
-    tests:
-      - dbt_utils.unique_combination_of_columns:
-          arguments:
-            combination_of_columns:
-              - timestamp
-              - region
-              - signal_name
-              - model
-
-    columns:
-      - name: issue_timestamp
-        description: "UTC timestamp when the forecast was issued."
-        tests:
-          - not_null
-
-      - name: timestamp
-        description: "UTC timestamp for the forecasted hour."
-        tests:
-          - not_null
-
-      - name: region
-        description: "Name of the region from which weather data was collected."
-        tests:
-          - not_null
-
-      - name: signal_name
-        description: "Name of the weather signal."
-        tests:
-          - not_null
-
-      - name: value
-        description: "Weather measurement value for the forecasted hour."
-        tests:
-          - not_null
-
-      - name: unit
-        description: "Unit of the weather measurement."
-        tests:
-          - not_null
-
-      - name: model
-        description: "Weather model used to generate the forecast."
-        tests:
-          - not_null
-
-      - name: fetched_at
-        description: "UTC timestamp when this record was fetched from source."
         tests:
           - not_null
