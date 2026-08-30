@@ -11,6 +11,8 @@ from ml.evaluate import baseline_persistence, directional_accuracy, full_evaluat
 
 
 class ModelType(Enum):
+    PRICE_HOURLY = "price_hourly"
+    PRICE_QUARTER_HOURLY = "price_quarter_hourly"
     PRICE = "price"
     WIND = "wind"
     SOLAR = "solar"
@@ -19,12 +21,13 @@ class ModelType(Enum):
 def filter_raw_data(X_raw, y_raw, mode: ModelType):
     # Imported here, not at module scope: feature_engineering imports ModelType
     # from this module, so a top-level import back would be circular.
-    from ml.features.feature_engineering import GenerationModelFeatureEngineer, PriceModelFeatureEngineer
 
     # Run the transformer ONCE to identify NaN rows, then drop from raw indices
     if mode == ModelType.PRICE:
+        from ml.features.feature_engineering import PriceModelFeatureEngineer
         feature_engineer = PriceModelFeatureEngineer()
     elif mode == ModelType.WIND or mode == ModelType.SOLAR:
+        from ml.features.feature_engineering import GenerationModelFeatureEngineer
         feature_engineer = GenerationModelFeatureEngineer()
 
     tmp = feature_engineer.transform(X_raw)
@@ -32,12 +35,7 @@ def filter_raw_data(X_raw, y_raw, mode: ModelType):
     del tmp
     
     X_raw = X_raw.loc[valid_idx]
-    if mode == ModelType.PRICE:
-        X_raw = X_raw.loc["2023-04-16":]
-
     y = y_raw.loc[valid_idx]
-    if mode == ModelType.PRICE:
-        y = y.loc["2023-04-16":]
 
     return X_raw, y
 
@@ -50,7 +48,10 @@ def create_preprocessor():
     """
     preprocessor = ColumnTransformer(
         transformers=[
-            ("num", StandardScaler(), make_column_selector(dtype_include="number")),
+            (
+                "num", StandardScaler(), 
+                make_column_selector(dtype_include="number")
+            ),
         ],
         remainder="passthrough",
         verbose_feature_names_out=False,

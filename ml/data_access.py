@@ -52,6 +52,41 @@ def load_ml_features(start_date: str | None = None, end_date: str | None = None)
         raise
 
 
+def load_hourly_price_model_features(
+    start_date: str | None = None,
+    end_date_exclusive: str | None = None,
+    filter_by_local_timestamp: bool = True,
+) -> pd.DataFrame:
+    """Load the hourly price-model contract from the analytics schema.
+    Setting filter_by_local_timestamp to True will use the local_timestamp column, which is the timestamp in the local timezone (Europe/Berlin), for filtering.
+    """
+    logger.info("Loading hourly price-model features from %s to %s (exclusive) (filter_by_local_timestamp=%s)", start_date, end_date_exclusive, filter_by_local_timestamp)
+
+    timestamp_column = "local_timestamp" if filter_by_local_timestamp else "timestamp"
+
+    try:
+        query = "SELECT * FROM analytics.fct_ml_hourly_price_model_features WHERE 1=1"
+        params: dict = {}
+
+        if start_date:
+            query += f" AND {timestamp_column} >= :start_date"
+            params["start_date"] = start_date
+        if end_date_exclusive:
+            query += f" AND {timestamp_column} < :end_date_exclusive"
+            params["end_date_exclusive"] = end_date_exclusive
+
+        query += f" ORDER BY {timestamp_column} ASC"
+
+        with engine.connect() as conn:
+            df = pd.read_sql_query(text(query), conn, params=params)
+            logger.info("Loaded %s hourly price-model rows from the database.", len(df))
+
+        return df.set_index(timestamp_column).sort_index()
+    except Exception:
+        logger.exception("Failed to load hourly price-model features")
+        raise
+
+
 def load_weather_forecast(start_date: str | None = None, end_date: str | None = None) -> pd.DataFrame:
     """
     Load weather forecast features from the database for the given date range.
