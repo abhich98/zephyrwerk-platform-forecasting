@@ -150,6 +150,9 @@ models:
       - name: residual_load_mw
         description: "Residual load in MW (total consumption minus variable renewables). Null when no data is reported."
 
+      - name: total_generation_mw
+        description: "Total generation in MW, calculated from the pivoted generation signals. Null when no generation signals are reported."
+
   - name: fct_market_prices
     description: "German day-ahead electricity spot prices (EUR/MWh) from SMARD. One row per timestamp and resolution."
     tests:
@@ -620,5 +623,43 @@ models:
 
       - name: is_workday
         description: "True if not a weekend and not a German public holiday. Sourced from dim_date."
+        tests:
+          - not_null
+
+  - name: fct_ml_hourly_price_model_features
+    description: "Hourly day-ahead price-model contract. Uses Europe/Berlin delivery dates and chronological market-product horizons; days may contain 23, 24, or 25 products around DST transitions. Lag and forecast-error features are joined by UTC timestamps."
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - timestamp
+              - resolution
+
+    columns:
+      - name: timestamp
+        description: "Start of the hourly market product in UTC."
+        tests:
+          - not_null
+
+      - name: resolution
+        description: "Always hour for this model contract."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [hour]
+
+      - name: delivery_date
+        description: "Europe/Berlin calendar date containing the market product."
+        tests:
+          - not_null
+
+      - name: horizon
+        description: "Chronological market-product position within the Europe/Berlin delivery date; 1-23, 1-24, or 1-25 depending on DST."
+        tests:
+          - not_null
+
+      - name: price_eur_mwh
+        description: "Target DE/LU day-ahead price in EUR/MWh."
         tests:
           - not_null

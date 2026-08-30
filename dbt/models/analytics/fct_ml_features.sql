@@ -18,6 +18,7 @@ SELECT
 
     g.residual_load_mw,
     g.total_consumption_mw,
+    g.total_generation_mw,
 
     -- Energy generation forecast features
     gf.wind_onshore_forecast_mw,
@@ -109,25 +110,25 @@ SELECT
     d.is_workday
 
 FROM 
-    {{ ref('fct_energy_generation') }} AS g
-        JOIN
-    {{ ref('fct_energy_generation_forecast') }} AS gf
-        ON g.timestamp = gf.timestamp
-        AND g.resolution = gf.resolution
-        JOIN
     {{ ref('fct_market_prices') }} AS mp
-        ON g.timestamp = mp.timestamp
-        AND g.resolution = mp.resolution
-        JOIN
+        LEFT JOIN
+    {{ ref('fct_energy_generation') }} AS g
+        ON mp.timestamp = g.timestamp
+        AND mp.resolution = g.resolution
+        LEFT JOIN
+    {{ ref('fct_energy_generation_forecast') }} AS gf
+        ON mp.timestamp = gf.timestamp
+        AND mp.resolution = gf.resolution
+        LEFT JOIN
     {{ ref('fct_price_spreads') }} AS ps
-        ON g.timestamp = ps.timestamp
-        AND g.resolution = ps.resolution
+        ON mp.timestamp = ps.timestamp
+        AND mp.resolution = ps.resolution
         LEFT JOIN
     {{ ref('fct_weather') }} AS w
-        ON g.timestamp = w.timestamp
+        ON mp.timestamp = w.timestamp
         LEFT JOIN
     {{ ref('fct_weather_forecast') }} AS wf
-        ON g.timestamp = wf.timestamp
+        ON mp.timestamp = wf.timestamp
         LEFT JOIN
     {{ ref('dim_date') }} AS d
-        ON g.timestamp :: date = d.date_day
+        ON mp.timestamp :: date = d.date_day

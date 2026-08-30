@@ -15,7 +15,21 @@ with generation_pivot as (
     MAX(value) FILTER(WHERE signal_name = 'OTHER_CONVENTIONAL') as other_conventional_mw,
     MAX(value) FILTER(WHERE signal_name = 'OTHER_RENEWABLE') as other_renewable_mw,
     MAX(value) FILTER(WHERE signal_name = 'TOTAL_CONSUMPTION') as total_consumption_mw,
-    MAX(value) FILTER(WHERE signal_name = 'RESIDUAL_LOAD') as residual_load_mw
+    MAX(value) FILTER(WHERE signal_name = 'RESIDUAL_LOAD') as residual_load_mw,
+    SUM(value) FILTER(WHERE signal_name IN (
+      'WIND_ONSHORE',
+      'WIND_OFFSHORE',
+      'SOLAR',
+      'BIOMASS',
+      'HYDROPOWER',
+      'PUMPED_STORAGE',
+      'NATURAL_GAS',
+      'HARD_COAL',
+      'BROWN_COAL',
+      'NUCLEAR',
+      'OTHER_CONVENTIONAL',
+      'OTHER_RENEWABLE'
+    )) as total_generation_mw
   from {{ ref('stg_smard_generation') }}
   group by timestamp, resolution
 )
