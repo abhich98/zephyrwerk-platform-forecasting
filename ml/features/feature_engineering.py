@@ -83,6 +83,8 @@ DROP_ALWAYS = ["nuclear_mw", "holiday_name", "date_day", "season"]
 
 HOURLY_PRICE_METADATA = ["resolution", "delivery_date", "timestamp", "local_timestamp"]
 HOURLY_PRICE_RAW_CALENDAR = ["year", "quarter", "month", "week_of_year", "day_of_week"]
+QUARTER_HOUR_PRICE_METADATA = HOURLY_PRICE_METADATA.copy()
+QUARTER_HOUR_PRICE_RAW_CALENDAR = HOURLY_PRICE_RAW_CALENDAR.copy()
 
 LAG_HORIZONS = [24, 168]
 
@@ -181,6 +183,33 @@ class HourlyPriceModelFeatureEngineer(BaseEstimator, TransformerMixin):
         df["month_cos"] = np.cos(2 * np.pi * (month - 1) / 12)
 
         to_drop = HOURLY_PRICE_METADATA + HOURLY_PRICE_RAW_CALENDAR
+        return df.drop(columns=[column for column in to_drop if column in df.columns])
+
+
+class QuarterHourPriceModelFeatureEngineer(BaseEstimator, TransformerMixin):
+    """Prepare rows from ``fct_ml_quarter_hour_price_model_features`` for training."""
+
+    def fit(self, X: pd.DataFrame, y=None):
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        if not isinstance(X.index, pd.DatetimeIndex):
+            raise TypeError("quarter-hour price features require a DatetimeIndex")
+
+        df = X.copy()
+        local_index = pd.DatetimeIndex(df.index)
+        hour = local_index.hour
+        day_of_week = local_index.dayofweek
+        month = local_index.month
+
+        df["hour_sin"] = np.sin(2 * np.pi * hour / 24)
+        df["hour_cos"] = np.cos(2 * np.pi * hour / 24)
+        df["dow_sin"] = np.sin(2 * np.pi * day_of_week / 7)
+        df["dow_cos"] = np.cos(2 * np.pi * day_of_week / 7)
+        df["month_sin"] = np.sin(2 * np.pi * (month - 1) / 12)
+        df["month_cos"] = np.cos(2 * np.pi * (month - 1) / 12)
+
+        to_drop = QUARTER_HOUR_PRICE_METADATA + QUARTER_HOUR_PRICE_RAW_CALENDAR
         return df.drop(columns=[column for column in to_drop if column in df.columns])
 
 

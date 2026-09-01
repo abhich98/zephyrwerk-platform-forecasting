@@ -1,6 +1,6 @@
 SELECT
-    g.timestamp,
-    g.resolution,
+    mp.timestamp,
+    mp.resolution,
 
     -- Energy generation features
     g.wind_onshore_mw,

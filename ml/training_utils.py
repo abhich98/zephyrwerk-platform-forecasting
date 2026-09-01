@@ -114,7 +114,7 @@ def test_model(y_pred, y_test, test_baseline_pred, mode: ModelType):
         include_directional=True, include_peak=False,
     )
     baseline_report = baseline_persistence(test_baseline_pred, y_test)
-    if mode == ModelType.PRICE:
+    if mode == ModelType.PRICE or mode == ModelType.PRICE_HOURLY or mode == ModelType.PRICE_QUARTER_HOURLY:
         holdout_report["directional_accuracy"] = directional_accuracy(y_test, test_baseline_pred)
 
     return holdout_report, baseline_report

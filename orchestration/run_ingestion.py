@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 
 from ingestion.loader import load_range
 from ingestion.s3_uploader import DATA_NAMES, is_already_uploaded, upload_to_s3, create_bucket_if_not_exists
-from ingestion.smard_client import fetch_range
+from ingestion.smard_client import fetch_range, RESOLUTION, SMARD_QUARTER_HOUR_SWITCH_DATE
 from ingestion.weather_client import fetch_historical_weather, fetch_forecast_weather_2
 
 
@@ -132,23 +132,34 @@ def run_pipeline(start_date: datetime, end_date: datetime):
 
     start_time = datetime.now()
 
-    # # ── Fetch the ENTIRE range in one pass ──────────────────────────────
-    # # SMARD serves weekly chunks, so fetching 1 day costs the same API calls
-    # # as fetching 7 days. Fetching the whole range at once eliminates ~7×
-    # # redundant weekly chunk downloads and ~2500× redundant index calls.
+    # ── Fetch the ENTIRE range in one pass ──────────────────────────────
+    # SMARD serves weekly chunks, so fetching 1 day costs the same API calls
+    # as fetching 7 days. Fetching the whole range at once eliminates ~7×
+    # redundant weekly chunk downloads and ~2500× redundant index calls.
 
-    # logger.info(f"Fetching SMARD data for {start_date.date()} → {end_date.date()}")
-    # smard_data = fetch_range(start_date=start_date, end_date=end_date)
-    # logger.info(f"SMARD fetch done: {len(smard_data)} rows")
+    # HOURLY DATA
+    logger.info(f"Fetching SMARD data for {start_date.date()} (UTC) → {end_date.date()} (UTC)")
+    smard_data = fetch_range(start_date=start_date, end_date=end_date)
+    logger.info(f"SMARD fetch done: {len(smard_data)} rows")
 
-    # # ── Split by day and upload (skipping days already in S3) ───────────
-    # _split_and_upload_by_day(smard_data, DATA_NAMES.SMARD)
+    # ── Split by day and upload (skipping days already in S3) ───────────
+    _split_and_upload_by_day(smard_data, DATA_NAMES.SMARD)
 
-    # logger.info(f"Fetching weather data for {start_date.date()} → {end_date.date()}")
-    # weather_data = _fetch_weather_chunked(start_date, end_date)
-    # logger.info(f"Weather fetch done: {len(weather_data)} rows")
+    # QUARTER-HOURLY DATA (only for dates after the switch date)
+    start_date_for_quarter_hour = max(start_date, SMARD_QUARTER_HOUR_SWITCH_DATE)
+    if start_date_for_quarter_hour < end_date:
+        logger.info(f"Fetching SMARD quarter-hourly data for {start_date_for_quarter_hour.date()} (UTC) → {end_date.date()} (UTC)")
+        smard_qh_data = fetch_range(start_date=start_date_for_quarter_hour, end_date=end_date, resolution=RESOLUTION.QUARTER_HOUR)
+        logger.info(f"SMARD quarter-hourly fetch done: {len(smard_qh_data)} rows")
 
-    # _split_and_upload_by_day(weather_data, DATA_NAMES.WEATHER)
+        _split_and_upload_by_day(smard_qh_data, DATA_NAMES.SMARD)
+
+    # ── Fetch and upload historical weather data ─────────────
+    logger.info(f"Fetching weather data for {start_date.date()} → {end_date.date()}")
+    weather_data = _fetch_weather_chunked(start_date, end_date)
+    logger.info(f"Weather fetch done: {len(weather_data)} rows")
+
+    _split_and_upload_by_day(weather_data, DATA_NAMES.WEATHER)
 
     # ── Fetch and upload historical/current weather forecasts (leak-safe) ───────
     # These are the forecasts that were actually available at auction time,
@@ -165,7 +176,7 @@ def run_pipeline(start_date: datetime, end_date: datetime):
     end_time = datetime.now()
     logger.info(f"Pipeline completed in {end_time - start_time}")
 
-    _run_dbt("run")  # Run dbt models to transform raw data into features
+    # _run_dbt("run")  # Run dbt models to transform raw data into features
     # _run_dbt("test")  # Run dbt tests to validate the transformed data
 
 
