@@ -1,319 +1,63 @@
-# Zephyrwerk Energy Analytics Platform
-
-Production-grade data engineering platform ingesting live German electricity market data (SMARD / Bundesnetzagentur), loading it into PostgreSQL, transforming it with dbt, forecasting prices and renewable generation with XGBoost, serving predictions via a FastAPI REST API, and visualising results in a Streamlit dashboard — deployed on AWS.
-
-Built as a portfolio project demonstrating end-to-end data platform engineering: from raw API ingestion to ML inference to cloud deployment.
-
----
-
-## Architecture
-
-**Stack:** Python · dbt Core · PostgreSQL · FastAPI · Streamlit · XGBoost · AWS (S3, RDS, ECS Fargate, Step Functions, EventBridge) · Docker · GitHub Actions
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        DATA SOURCES                             │
-│         SMARD API                    Open-Meteo API             │
-│   (generation, consumption,    (historical + forecast weather:  │
-│    prices, neighbour prices)      wind, solar, temperature)     │
-└────────────────────┬────────────────────────┬───────────────────┘
-                     │                        │
-                     ▼                        ▼
-              ingestion/smard_client.py   ingestion/weather_client.py
-                     │                  (historical + forecast fetch)
-                     └───────────┬────────────┘
-                                 │ raw JSON → Parquet
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    AWS S3 — RAW LAYER                           │
-│  s3://zephyrwerk-data-lake/raw/smard/year=YYYY/month=MM/        │
-│  s3://zephyrwerk-data-lake/raw/weather/year=YYYY/month=MM/      │
-│  s3://zephyrwerk-data-lake/raw/weather_forecast/ (day-ahead)    │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ ingestion/loader.py
-                              │ (Parquet → UPSERT into Postgres)
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│           AWS RDS PostgreSQL — raw schema                       │
-│  smard_generation, smard_prices, smard_neighbour_prices,        │
-│  weather, weather_forecast                                     │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ dbt Core — staging models (views)
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│           AWS RDS PostgreSQL — staging schema                   │
-│  stg_smard_generation, stg_smard_prices,                        │
-│  stg_smard_neighbour_prices, stg_weather, stg_weather_forecast  │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ dbt Core — analytics models (tables)
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│           AWS RDS PostgreSQL — analytics schema                 │
-│  dim_date                                                       │
-│  fct_energy_generation       fct_market_prices                  │
-│  fct_price_spreads           fct_weather_features               │
-│  fct_ml_features  ← training data: real observed values only    │
-│  fct_weather_forecast_features ← day-ahead forecast, used only  │
-│                                   at inference time, never in   │
-│                                   training (leak-free by design) │
-└──────────────┬──────────────────────────┬───────────────────────┘
-               │                          │
-               ▼                          ▼
-┌──────────────────────┐     ┌────────────────────────────────────┐
-│     ML MODELS         │     │     FastAPI — AWS ECS Fargate      │
-│  3 separate XGBoost   │     │  GET  /health                      │
-│  models: price, wind,  │     │  GET  /energy/generation           │
-│  solar — each its own │     │  GET  /energy/prices               │
-│  sklearn Pipeline     │     │  GET  /energy/summary              │
-│                       │     │  POST /predict/price               │
-│  s3://.../models/     │     │  POST /predict/generation          │
-│    price_forecast/    │     │                                    │
-│    wind_forecast/     │     │  OpenAPI docs auto-generated       │
-│    solar_forecast/    │     └──────────────────┬─────────────────┘
-└──────────────────────┘                        ▼
-                              ┌──────────────────────────────────┐
-                              │  Streamlit — AWS ECS Fargate     │
-                              │  Historical Overview             │
-                              │  Market Monitor                  │
-                              │  Forecast Viewer                 │
-                              └──────────────────────────────────┘
-
-CI/CD:         GitHub Actions → Docker build → ECR push → ECS deploy
-Orchestration: EventBridge → Step Functions → ECS Tasks (daily 06:00 UTC)
-Monitoring:    AWS CloudWatch (logs + cost alerts)
-```
-
-**Three-schema design.** `loader.py` is the bridge between the S3 data lake and PostgreSQL — dbt does not read from S3 directly. The `raw` schema mirrors S3 Parquet and is fully reloadable. `staging` is dbt views (no storage cost, always fresh). `analytics` is dbt tables (pre-computed for query performance). The five historical fact tables share hourly grain and identical row counts (65,208 hours over the 2019–2026 window); `fct_weather_forecast_features` is intentionally separate — it holds only the rolling day-ahead forecast horizon, kept structurally isolated from training data so the ML models never see forecast values during training.
-
-**Forecast/historical separation.** A live prediction request needs tomorrow's weather, but the model was trained only on real, observed values. Rather than have the API call Open-Meteo directly, a dedicated daily ingestion path fetches the day-ahead forecast, and it flows through its own raw → staging → analytics tables, joined into the feature set only at inference time. This keeps the API's only job "read Postgres" (same env-var-driven code path locally and in AWS) and keeps training data 100% free of forecast-vs-actual leakage.
-
----
-
-## Phases
-
-| Phase | Scope | Status |
-|---|---|---|
-| 1 — Ingestion | SMARD + Open-Meteo clients, S3 raw layer, LocalStack | ✅ Complete · `v0.1.0` |
-| 2 — EDA | Jupyter notebooks, energy mix analysis, findings | ✅ Complete · `v0.2.0` |
-| 3 — dbt | Loader, raw/staging/analytics schemas, dbt tests, Dockerfiles | ✅ Complete · `v0.3.0` |
-| 4 — ML | XGBoost price + generation (wind/solar) forecasting, model registry | ✅ Complete · `v0.4.0` |
-| 5 — API | FastAPI service, all endpoints, day-ahead prediction pipeline, pytest suite | ✅ Complete · `v0.5.0` |
-| 6 — Dashboard | Streamlit multipage dashboard, Docker Compose | 🔜 Not started |
-| 7 — AWS | Full cloud deployment, CI/CD, v1.0.0 release | 🔜 Not started |
+# Time-Series Forecasting for Energy Markets
 
----
+Energy markets are fundamentally time-dependent: demand, renewable generation, weather, and price formation all evolve hour by hour (or quarter-hour by quarter-hour). In day-ahead power markets, decisions are made *before* realized prices are known, so forecast quality directly affects dispatch quality, trading outcomes, and risk exposure.
 
-## Key EDA Findings (Phase 2)
+This is especially important for batteries and flexible portfolios, where each wrong forecast can consume limited cycle budget on suboptimal spreads.
 
-Seven years of German electricity data (2019–2025, ~2.6M hourly rows) across 22 SMARD signals and 4 weather locations.
+## Motivation from external benchmark evidence
 
-### Energy Mix Evolution
+This work is motivated by the Re-Twin Energy article:
 
-- **Germany became a net electricity importer in 2023.** The nuclear phase-out removed ~8 GW of baseload; renewable additions (+4 GW) only partially offset it. Germany stabilised at ~3 GW continuous net import.
-- **Renewable share grew from 43.6% to 60.2%**, but ~80% of the 2023 jump came from nuclear leaving the denominator, not new renewable capacity.
-- **Solar is the only renewable source that grew consistently** (+76% over the window, 4.8 → 8.4 GW average). Wind onshore has declined two years running.
-- **Coal's structural decline only began in 2023** — the 2022 gas crisis kept fossil generation elevated because coal was suddenly cheaper than gas.
+- **Article:** *Impact of Day-Ahead Forecast Accuracy on BESS Revenues*
+- **URL:** https://re-twin.energy/blog/impact-of-day-ahead-forecast
+- **Study setup (article):** Germany, 15-minute day-ahead prices, Jan–Mar 2026 backtest
 
-### Price Dynamics
+### Financial impact figures reported in the article
 
-- **Three structurally distinct price regimes:** pre-crisis (mean €59/MWh), 2022 gas crisis (mean €216/MWh, peak €871), post-nuclear (mean €85/MWh with extremes of −€500 to +€936).
-- **Negative prices grew from 1.6% (2021) to 6.5% (2025)** of hours — now a structural feature of the renewable-heavy grid, concentrated in spring/summer midday solar surplus hours.
-- **Residual load is the primary price driver** (Pearson r = 0.831). The empirical supply curve shows three zones: negative prices at <15 GW, competitive pricing at 15–40 GW, and steep scarcity pricing above ~40 GW.
-- **The duck curve is visible in German prices**: summer midday prices dip near zero or negative; winter morning prices peak as high consumption meets low solar and minimum wind.
+For a representative **2h battery, 1.5 cycles/day**, the article reports:
 
-### Consumption Patterns
+| Signal | Revenue (EUR/MW) | Captured vs Perfect Foresight | Gap to Perfect Foresight (EUR/MW) |
+|---|---:|---:|---:|
+| Previous-day baseline | 10,904 | 78.4% | 3,010 |
+| Re-Twin forecast | 11,628 | 83.6% | 2,286 |
+| Electricity Maps forecast | 12,163 | 87.4% | 1,751 |
+| Perfect foresight | 13,914 | 100.0% | 0 |
 
-- **Industrial demand destruction, not residential.** Total consumption fell ~5 GW from the 2021 peak (57.6 GW) to 2025 (53.0 GW). The weekday–Sunday load gap shrunk from 12.4 GW to 10.3 GW — a clear industrial signature.
-- **Germany's highest-stress grid period is early January/February, not Christmas** — December consumption drops due to industrial shutdown.
-- **Residual load volatility grew 56%** even as its mean shrank 22%, which is the structural cause of persistent European price volatility.
+The same article reports price-forecast MAE values:
 
-### Neighbour Price Spreads
+- Previous-day baseline: **27.9 EUR/MWh**
+- Re-Twin forecast: **21.4 EUR/MWh**
+- Electricity Maps forecast: **17.2 EUR/MWh**
 
-- **Germany is geographically split:** structurally cheaper than Poland (+€29/MWh average spread) and France (+€19/MWh); more expensive than Alpine zones (Austria −€5.50, Switzerland −€5.23).
-- **Switzerland and France carry the most predictive spread information** for next-hour DE/LU prices (lead-1h Pearson r = 0.538, 0.501), reflecting Alpine hydro storage and French nuclear as independent supply signals.
-- **Danish spreads are weak predictors** despite high level-correlation — both markets are wind-coupled, so the spread collapses to noise.
+These numbers provide a practical business reason for this project: reducing forecasting error can materially increase realized value from the same physical energy asset.
 
-> Full analysis, charts, and downstream recommendations: [`notebooks/eda/FINDINGS.md`](notebooks/eda/FINDINGS.md)
+## Project lineage
 
----
+The original end-to-end data [platform](https://github.com/hasanerdin/zephyrwerk-platform/tree/main) and ML workflow was developed by **Hasan Erdin**. I adapted and extended this repository for focused **time-series forecasting and experimentation**, including rolling/expanding-window evaluation and comparative benchmarking.
 
-## ML Model Results (Phase 4)
+## Metrics achieved in this repository
 
-Three separate XGBoost models — price, wind generation, solar generation — each its own sklearn `Pipeline`, evaluated against a naive persistence baseline (predict "same as this time yesterday").
+The table below summarizes the key forecasting results from the reports in `ml/artifacts` and compares each MAE against the article benchmark MAE.
 
-| Model | MAE | vs. baseline | R² | Notes |
-|---|---|---|---|---|
-| **Price** (€/MWh) | 18.10 | 46% lower (baseline 33.53) | — | 0.81 deviation directional accuracy — correctly calls whether a price will beat yesterday's same hour 81% of the time |
-| **Wind** (MW) | 3,121 | 65% lower (baseline 8,840) | 0.82 | Genuinely chaotic signal (turbulence); peak-hour MAE runs ~65% above average |
-| **Solar** (MW) | 1,375 | 47% lower (baseline 2,583) | 0.97 | Dominated by deterministic solar geometry; model under-predicts summer noon peaks by 10–12% (documented, not corrected — a physical limit, not a bug) |
+> Data sources in this repo: `ml/artifacts/price_hourly_model_report.json`, `ml/artifacts/price_forecast_model_report.json`, `ml/artifacts/re_twin_study_price_benchmark_report.json`.
 
-All three models beat their cross-validation mean by less than one standard deviation on the final holdout set — no overfitting. Full methodology, leakage-prevention design, and metric selection reasoning: [`PHASE_4_OUTPUTS.md`](PHASE_4_OUTPUTS.md).
+| Model / Evaluation | MAE (EUR/MWh) | Baseline MAE (EUR/MWh) | Training Window | Test / Holdout Window | MAE vs Article EM (17.2) | MAE vs Article Re-Twin (21.4) |
+|---|---:|---:|---|---|---:|---:|
+| Price quarter-hourly (2-stage weekly expanding, Stage 2 holdout aggregate) | 17.715 | 26.095 | Expanding from 2025-10-01 up to each forecast week start | 2026-01-01 to 2026-04-01 (exclusive) | +0.515 (worse) | **-3.685** (better) |
+| Article benchmark: Electricity Maps forecast | 17.2 | 27.9 (prev-day) | n/a (external study) | 2026-01-01 to 2026-03-31 | 0.000 | **-4.200** |
+| Article benchmark: Re-Twin forecast | 21.4 | 27.9 (prev-day) | n/a (external study) | 2026-01-01 to 2026-03-31 | +4.200 | 0.000 |
 
----
+<!-- | Price hourly (single-window holdout) | **16.178** | 26.863 | 2023-05-01 00:00 to 2025-12-31 23:00 | 2026-01-01 00:00 to 2026-03-31 23:00 | **-1.022** (better) | **-5.222** (better) |
+| Price hourly (2-stage weekly expanding, Stage 1 holdout aggregate) | **15.276** | 26.948 | Expanding from 2023-05-01 up to each forecast week start | 2026-01-01 to 2026-04-01 (exclusive) | **-1.924** (better) | **-6.124** (better) | -->
 
-## API (Phase 5)
+## Interpretation
 
-FastAPI service with dependency injection + repository pattern, auto-generated OpenAPI docs at `/docs`, and a graceful-degradation contract: missing input data returns nullable fields with `200`, a missing/unavailable model returns `503` rather than crashing.
+- The repository’s **hourly models** (both single-window and Stage 1 in 2-stage backtest) outperform the article’s published 17.2 EUR/MWh reference MAE.
+- The **quarter-hour Stage 2 model** is slightly above 17.2 EUR/MWh, but still materially better than the article’s 21.4 EUR/MWh Re-Twin MAE and much better than previous-day baseline levels.
+- Overall, the results support the same practical conclusion as the article: **forecast accuracy is economically meaningful**, not just statistically meaningful.
 
-The hardest part of this phase was serving day-ahead predictions correctly: the models need real historical lag features (price 24h/168h ago, etc.) that only exist in Postgres, plus tomorrow's weather forecast, which is ingested once daily and kept in its own table — fully isolated from training data — rather than the API calling external weather APIs per request. A cascading lag-fallback (24h → 48h → 168h) handles the case where a short-horizon lag reference is itself still in the future. `target_date` is constrained to today/tomorrow, matching the horizon the models were actually trained and evaluated for.
+## Notes on comparability
 
-175 tests, `ruff`-clean, containerized (`api/Dockerfile`), CI running pytest + lint on every PR.
-
----
-
-## Local Setup
-
-### Prerequisites
-
-- **Python 3.12** managed via [`uv`](https://docs.astral.sh/uv/) — pinned to 3.12 because `dbt-core`'s `mashumaro` dependency fails on 3.14
-- **Docker** — runs LocalStack (S3 emulator) and PostgreSQL locally
-
-### Install
-
-```bash
-git clone https://github.com/hasanerdin/zephyrwerk-platform.git
-cd zephyrwerk-platform
-
-uv venv --python 3.12
-uv sync --extra dev
-```
-
-### Configure environment
-
-```bash
-cp .env.example .env
-# Edit .env — all required keys are documented in .env.example
-```
-
-Key variables:
-
-| Variable | Local default | Purpose |
-|---|---|---|
-| `AWS_ENDPOINT_URL` | `http://localhost:4566` | Points boto3 at LocalStack; leave empty in production |
-| `ZEPHYRWERK_AWS_BUCKET_NAME` | `zephyrwerk-data-lake` | S3 bucket |
-| `ZEPHYRWERK_RDS_HOST` | `localhost` | PostgreSQL host |
-| `ZEPHYRWERK_RDS_PORT` | `5432` | PostgreSQL port |
-| `ZEPHYRWERK_RDS_DB` | `zephyrwerk` | Database name |
-
-### Start local infrastructure
-
-```bash
-# LocalStack — S3 emulation. Moved away from localstack to minio.
-# localstack, including localstack:3.8, did not support persistence of S3 buckets across container restarts. MinIO is a better alternative for local S3 emulation.
-docker run -d \
-  -p 4566:9000 \
-  -v "$(pwd)/minio-data:/data" \
-  -e MINIO_ROOT_USER=zephyrwerk \
-  -e MINIO_ROOT_PASSWORD=zephyrwerk \
-  --name zephyrwerk-minio \
-  quay.io/minio/minio server /data --console-address ":9001"
-
-# PostgreSQL — mounts db/init.sql which creates raw, staging,
-# analytics schemas and all five raw tables (including weather_forecast)
-# on first start
-docker run -d \
-  --name zephyrwerk-postgres \
-  -p 5432:5432 \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=zephyrwerk \
-  -v "$(pwd)/db/init.sql:/docker-entrypoint-initdb.d/init.sql" \
-  postgres:16
-```
-
-> If the container already existed before `weather_forecast` was added to
-> `init.sql`, the mounted script only runs on first container init. Apply
-> it manually instead: `docker exec -i zephyrwerk-postgres psql -U postgres -d zephyrwerk < db/init.sql`
-> (safe to re-run — every statement is `CREATE ... IF NOT EXISTS`).
-
-### Run the ingestion pipeline
-
-`orchestration/run_pipeline.py` has three modes:
-
-```bash
-# Historical backfill (one-time, full window) — end date is always
-# clamped to yesterday, since no future SMARD data can ever exist
-python orchestration/run_pipeline.py --mode historical --start_date 2019-01-01 --end_date 2025-12-31
-
-# Daily run — yesterday's real SMARD + weather data, plus an 8-day-ahead
-# weather forecast fetch (feeds the API's /predict/* endpoints)
-python orchestration/run_pipeline.py --mode daily
-
-# Weekly — retrains and re-publishes all 3 models from whatever's
-# currently in fct_ml_features. Deliberately independent of --mode daily
-# (separate failure domain) — in production these are two separate
-# EventBridge/Step Functions triggers, sequenced by time (daily at 06:00
-# UTC, weekly at 07:00 UTC on Mondays) so weekly always sees that
-# morning's fresh data. Locally, run --mode daily first if you want the
-# same guarantee.
-python orchestration/run_pipeline.py --mode weekly
-```
-
-The pipeline is idempotent: re-running a date range skips Parquet files already in S3, and the loader upserts into Postgres so SMARD value revisions are picked up correctly. Forecast weather is re-fetched daily and superseded by the real observed value once that day's normal ingestion runs — the loader's upsert naturally overwrites forecast with actual, no reconciliation step needed.
-
-### Run dbt transformations
-
-```bash
-cd dbt
-
-# One-time setup
-dbt deps                          # installs dbt_utils
-dbt seed --profiles-dir .         # loads German public holidays CSV
-
-# Build and test
-dbt run  --profiles-dir .         # builds staging views + analytics tables
-dbt test --profiles-dir .         # runs schema tests + singular tests
-```
-
-> `dbt` is deliberately **not** wired into `run_pipeline.py`. In production (Phase 7) ingestion, loader, and dbt run as separate ECS tasks orchestrated by Step Functions — keeping them separate locally preserves architectural honesty.
-
-### Run EDA notebooks
-
-```bash
-uv run jupyter lab notebooks/eda/
-```
-
-Notebooks in order: `00_data_audit` → `01_energy_mix_history` → `02_renewable_seasonality` → `03_consumption_patterns` → `04_price_dynamics` → `05_price_spreads`
-
-### Train / retrain the ML models
-
-```bash
-python ml/train_price_model.py
-python ml/train_generation_model.py   # trains both wind and solar
-```
-
-Both scripts read `fct_ml_features` from Postgres, train, evaluate against
-a persistence baseline, and publish to the S3 model registry (`latest/` +
-a timestamped `archive/` copy, plus a `metadata.json` sidecar). The API
-must have at least one successfully-published model per target before
-`/predict/*` will return anything other than a `503`.
-
-### Run the API
-
-```bash
-uv run uvicorn api.main:app --reload
-```
-
-Then visit `http://127.0.0.1:8000/docs` for interactive OpenAPI docs, or
-check `http://127.0.0.1:8000/health` to confirm DB connectivity and that
-all three models loaded successfully from S3.
-
-### Run tests
-
-```bash
-uv run pytest
-```
-
----
-
-## Data Sources
-
-- **SMARD** (Bundesnetzagentur) — 12 generation signals, total consumption, residual load, DE/LU day-ahead prices, and 8 neighbour-zone prices · CC BY 4.0
-- **Open-Meteo** — Historical (ERA5 reanalysis) and forecast weather for 4 German regions co-located with Zephyrwerk's wind and solar assets · Free for non-commercial use
-
----
-
-## Author
-
-Hasan Erdin — Data Engineer & Applied Data Scientist, Munich
-[GitHub](https://github.com/hasanerdin) · [LinkedIn](https://linkedin.com/in/hasanerdin)
+- External and internal studies are not perfectly identical (data contract details, data omission, model classes, and holdout slicing most possibly differ).
+- The article benchmark report stored in this repo explicitly preserves published MAE values and notes that additional metrics (RMSE, R², directional accuracy) were not provided in the source article.
+- **Use MAE comparisons as directional performance context rather than strict like-for-like head-to-head claims.**
