@@ -1,6 +1,7 @@
 import json
 from enum import Enum
 from pathlib import Path
+from typing import overload
 
 import pandas as pd
 from sklearn.compose import ColumnTransformer, make_column_selector
@@ -82,27 +83,27 @@ def create_ml_model():
     model = XGBRegressor(**xgb_params)
     return model
 
-def save_report(report, mode: ModelType):
-    """
-    Save the training report to a JSON file.
 
-    Args:
-        report (dict): Report dictionary containing training and evaluation metrics.
-        mode (ModelType): The type of model for which to save the report.
-    """
-    file_name = f"ml/artifacts/{mode.value}_model_report.json"
+@overload
+def save_report(report: dict, mode: ModelType) -> None: ...
+@overload
+def save_report(report: dict, file_name: str) -> None: ...
+
+def save_report(report: dict, target: ModelType | str) -> None:
+    name = f"{target.value}_model_report" if isinstance(target, ModelType) else target
+    file_path = f"ml/artifacts/{name}.json"
     Path("ml/artifacts").mkdir(exist_ok=True)
-    with open(file_name, "w") as f:
+    with open(file_path, "w") as f:
         json.dump(report, f, indent=2)
 
 
-def test_model(y_pred, y_test, test_baseline_pred, mode: ModelType):
+def evaluate_holdout(y_pred, y_true, test_baseline_pred):
     """
-    Test the trained model pipeline on the test set and return predictions.
+    Return the holdout and baseline evaluation reports.
 
     Args:
         y_pred (pd.Series): Predicted values for the test set.
-        y_test (pd.Series): Actual values for the test set.
+        y_true (pd.Series): Actual values for the test set.
         test_baseline_pred (pd.Series): Baseline predictions for the test set.
 
     Returns:
@@ -110,16 +111,14 @@ def test_model(y_pred, y_test, test_baseline_pred, mode: ModelType):
     """
     
     holdout_report = full_evaluation_report(
-        y_test, y_pred, reference=test_baseline_pred,
+        y_true, y_pred, reference=test_baseline_pred,
         include_directional=True, include_peak=False,
     )
-    baseline_report = baseline_persistence(test_baseline_pred, y_test)
-    if mode == ModelType.PRICE or mode == ModelType.PRICE_HOURLY or mode == ModelType.PRICE_QUARTER_HOURLY:
-        holdout_report["directional_accuracy"] = directional_accuracy(y_test, test_baseline_pred)
+    baseline_report = baseline_persistence(test_baseline_pred, y_true)
 
     return holdout_report, baseline_report
 
-def draw_predictions(y_pred, y_test, mode: ModelType):
+def draw_predictions(y_pred, y_test, key_word: str):
     """
     Draw predictions for one of the models, right after y_pred is computed.
     """
@@ -129,6 +128,6 @@ def draw_predictions(y_pred, y_test, mode: ModelType):
     y_test.plot(ax=ax, label="actual", alpha=0.7)
     pd.Series(y_pred, index=y_test.index).plot(ax=ax, label="predicted", alpha=0.7)
     ax.legend()
-    ax.set_title(f"{mode.value} — holdout")
+    ax.set_title(f"{key_word} — holdout")
     plt.tight_layout()
-    plt.savefig(f"ml/artifacts/{mode.value}_holdout.png", dpi=100)
+    plt.savefig(f"ml/artifacts/{key_word}_holdout.png", dpi=100)

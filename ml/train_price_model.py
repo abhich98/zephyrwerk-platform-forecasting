@@ -10,6 +10,8 @@ from ml.data_access import (
     load_quarter_hour_price_model_features,
 )
 from ml.features.feature_engineering import (
+    TARGET_COLUMNS,
+    BASELINE_PRED_COLUMNS,
     HourlyPriceModelFeatureEngineer,
     QuarterHourPriceModelFeatureEngineer,
     drop_incomplete_days,
@@ -23,9 +25,8 @@ from ml.training_utils import (
     create_preprocessor,
     draw_predictions,
     save_report,
-    test_model,
+    evaluate_holdout,
 )
-from ml.evaluate import regression_metrics
 from ml.wandb_tracking import (
     log_optional_artifacts,
     log_training_report,
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 STAGE1_START_DATE = "2023-05-01"
 STAGE2_START_DATE = "2025-10-01"
 HOLDOUT_START_DATE = "2026-01-01"
+HOLDOUT_END_DATE_EXCLUSIVE = "2026-04-01"
 WEEKLY_PREDICTION_DAYS = 7
 WEEK_START_DAY_IDX = 0 # Monday
 
@@ -74,7 +76,7 @@ def _predict_stage1_for_window(
     hourly_raw: pd.DataFrame,
     prediction_start: pd.Timestamp,
     prediction_end: pd.Timestamp,
-) -> tuple[Pipeline, pd.Series]:
+)-> tuple[Pipeline, pd.Series]:
     """Fit Stage 1 only on rows before a weekly prediction window."""
 
     train_raw = hourly_raw.loc[hourly_raw.index < prediction_start]
@@ -106,25 +108,66 @@ def _broadcast_hourly_predictions(
     )
 
 
-def run_quarter_hourly_price_model_training(
+def _build_weekly_starts(holdout_start: pd.Timestamp, holdout_end: pd.Timestamp) -> pd.DatetimeIndex:
+    """Build weekly prediction-window starts for warmup and holdout periods."""
+    stage2_start = pd.Timestamp(STAGE2_START_DATE)
+
+    training_week_starts = pd.DatetimeIndex([STAGE2_START_DATE]).append(
+        pd.date_range(
+            start=stage2_start + pd.Timedelta(days=WEEKLY_PREDICTION_DAYS - stage2_start.weekday()),
+            end=holdout_start,
+            freq=f"{WEEKLY_PREDICTION_DAYS}D",
+            inclusive="left",
+        )
+    )
+
+    holdout_week_starts = pd.DatetimeIndex([HOLDOUT_START_DATE]).append(
+        pd.date_range(
+            start=holdout_start + pd.Timedelta(days=WEEKLY_PREDICTION_DAYS - holdout_start.weekday()),
+            end=holdout_end,
+            freq=f"{WEEKLY_PREDICTION_DAYS}D",
+            inclusive="left",
+        )
+    )
+
+    return pd.DatetimeIndex(training_week_starts.append(holdout_week_starts))
+
+
+def _initialize_predictions_store(*model_types: ModelType) -> dict[str, dict[str, list[pd.Series]]]:
+    """Create per-stage containers for predictions, baselines, and actuals."""
+    return {
+        model_type.value: {
+            "predictions": [],
+            "baseline_predictions": [],
+            "actuals": [],
+        }
+        for model_type in model_types
+    }
+
+
+def run_price_model_training(
     hourly_raw: pd.DataFrame,
     quarter_hourly_raw: pd.DataFrame,
     wandb_track: bool = True,
 ) -> None:
-    """Backtest Stage 2 in weekly expanding windows and save the last pipelines.
+    """Backtest Both stages in weekly expanding windows and save the last pipelines.
 
     Each weekly window is predicted by fresh Stage 1 and Stage 2 pipelines fit only
     on prior delivery days. Stage 2 learns the deviation from Stage 1's historical
     out-of-sample point prediction, then reconstructs quarter-hour prices.
     """
-    model_type = ModelType.PRICE_QUARTER_HOURLY
+    model_stage1 = ModelType.PRICE_HOURLY
+    model_stage2 = ModelType.PRICE_QUARTER_HOURLY
     train_start_time = datetime.now(timezone.utc)
+
     report: dict[str, object] = {
-        "model": f"{model_type.value}_forecast",
+        "model": "price_forecast",
         "trained_at": train_start_time.isoformat(),
         "backtest": "weekly_expanding_window",
-        "stage2_train_start": STAGE2_START_DATE,
+        f"{model_stage1.value}_train_start": STAGE1_START_DATE,
+        f"{model_stage2.value}_train_start": STAGE2_START_DATE,
         "holdout_start": HOLDOUT_START_DATE,
+        "holdout_end_exclusive": HOLDOUT_END_DATE_EXCLUSIVE,
         "prediction_window_days": WEEKLY_PREDICTION_DAYS,
     }
 
@@ -134,42 +177,47 @@ def run_quarter_hourly_price_model_training(
             run_name=f"{report['model']}-training-{train_start_time.strftime('%Y%m%d-%H%M%S')}",
             group=str(report["model"]),
         )
+        tracking_run.config.update(report)
 
-    logger.info("*"*10 + "Filling short gaps and dropping incomplete days in hourly data" + "*"*10)
+    logger.info("%sFilling short gaps and dropping incomplete days in hourly data%s", "*" * 10, "*" * 10)
     hourly_raw = drop_incomplete_days(_fill_short_feature_gaps(hourly_raw, omit_columns=["price_eur_mwh"]))
-    logger.info("*"*10 + "Filling short gaps and dropping incomplete days in quarter-hourly data" + "*"*10)
+    logger.info(
+        "%sFilling short gaps and dropping incomplete days in quarter-hourly data%s",
+        "*" * 10,
+        "*" * 10,
+    )
     quarter_hourly_raw = drop_incomplete_days(_fill_short_feature_gaps(quarter_hourly_raw, omit_columns=["price_eur_mwh"]))
 
     holdout_start = pd.Timestamp(HOLDOUT_START_DATE)
-    final_end = quarter_hourly_raw.index.max().normalize() + pd.Timedelta(days=1)
-    training_week_starts = pd.date_range(
-        start=pd.Timestamp(STAGE2_START_DATE),
-        end=holdout_start,
-        freq=f"{WEEKLY_PREDICTION_DAYS}D",
-        inclusive="left",
-    )
-    holdout_week_starts = pd.date_range(
-        start=holdout_start,
-        end=final_end,
-        freq=f"{WEEKLY_PREDICTION_DAYS}D",
-        inclusive="left",
-    )
-    weekly_starts = training_week_starts.append(holdout_week_starts)
+    holdout_end = pd.Timestamp(HOLDOUT_END_DATE_EXCLUSIVE)
+    weekly_starts = _build_weekly_starts(holdout_start=holdout_start, holdout_end=holdout_end)
 
     annotated_windows: list[pd.DataFrame] = []
-    predictions: list[pd.Series] = []
-    baseline_predictions: list[pd.Series] = []
-    actuals: list[pd.Series] = []
+    predictions_dict = _initialize_predictions_store(model_stage1, model_stage2)
     weekly_reports: list[dict[str, object]] = []
     final_stage1_pipeline = None
     final_stage2_pipeline = None
 
     for prediction_start in weekly_starts:
-        prediction_end = min(prediction_start + pd.Timedelta(days=WEEKLY_PREDICTION_DAYS), final_end)
-        quarter_window = quarter_hourly_raw.loc[
+        if prediction_start <= hourly_raw.index.min().normalize():
+            continue
+        if prediction_start <= quarter_hourly_raw.index.min().normalize():
+            continue
+
+        prediction_end = min(
+            prediction_start + pd.Timedelta(days=WEEKLY_PREDICTION_DAYS),
+            holdout_end,
+        )
+
+        hourly_window = hourly_raw.loc[
+            (hourly_raw.index >= prediction_start) & (hourly_raw.index < prediction_end)
+        ].copy()
+        quarter_hourly_window = quarter_hourly_raw.loc[
             (quarter_hourly_raw.index >= prediction_start) & (quarter_hourly_raw.index < prediction_end)
         ].copy()
-        if quarter_window.empty:
+
+        if hourly_window.empty:
+            logger.warning("Skipping %s because its hourly rows are incomplete", prediction_start.date())
             continue
 
         stage1_pipeline, stage1_predictions = _predict_stage1_for_window(
@@ -177,18 +225,27 @@ def run_quarter_hourly_price_model_training(
             prediction_start,
             prediction_end,
         )
-        quarter_window["stage1_prediction"] = _broadcast_hourly_predictions(
-            pd.DatetimeIndex(quarter_window.index),
+        quarter_hourly_window["stage1_prediction"] = _broadcast_hourly_predictions(
+            pd.DatetimeIndex(quarter_hourly_window.index),
             stage1_predictions,
         )
-        # quarter_window = drop_incomplete_days(quarter_window)
-        if quarter_window.empty:
+
+        if quarter_hourly_window.empty:
             logger.warning("Skipping %s because its quarter-hour rows are incomplete", prediction_start.date())
             continue
 
+        annotated_windows.append(quarter_hourly_window)
         if prediction_start < holdout_start:
-            annotated_windows.append(quarter_window)
             continue
+
+        # Collect stage1 results
+        predictions_dict[model_stage1.value]["predictions"].append(stage1_predictions)
+        predictions_dict[model_stage1.value]["baseline_predictions"].append(
+            hourly_window[BASELINE_PRED_COLUMNS[model_stage1]]
+        )
+        predictions_dict[model_stage1.value]["actuals"].append(
+            hourly_window[TARGET_COLUMNS[model_stage1]]
+        )
 
         # Stage 2 training uses all prior Stage 1 predictions and actuals to learn the deviation
         stage2_training_rows = pd.concat(annotated_windows).sort_index()
@@ -198,13 +255,13 @@ def run_quarter_hourly_price_model_training(
 
         X_stage2_train, stage2_price_train = split_x_y(
             stage2_training_rows,
-            model_type=ModelType.PRICE_QUARTER_HOURLY,
+            model_type=model_stage2,
         )
         stage2_deviation_train = stage2_price_train - X_stage2_train.pop("stage1_prediction")
 
-        X_stage2_window, quarter_actual = split_x_y(
-            quarter_window,
-            model_type=ModelType.PRICE_QUARTER_HOURLY,
+        X_stage2_window, quarter_hourly_actual = split_x_y(
+            quarter_hourly_window,
+            model_type=model_stage2,
         )
         stage1_window_prediction = X_stage2_window.pop("stage1_prediction")
 
@@ -212,64 +269,92 @@ def run_quarter_hourly_price_model_training(
         stage2_pipeline.fit(X_stage2_train, stage2_deviation_train)
         reconstructed_price = pd.Series(
             stage1_window_prediction.to_numpy() + stage2_pipeline.predict(X_stage2_window),
-            index=quarter_actual.index,
+            index=quarter_hourly_actual.index,
             name="price_eur_mwh_prediction",
         )
 
-        weekly_report = regression_metrics(quarter_actual, reconstructed_price)
-        weekly_report.update(
-            {
-                "prediction_start": prediction_start.isoformat(),
-                "prediction_end_exclusive": prediction_end.isoformat(),
-                "n_stage1_train": int((hourly_raw.index < prediction_start).sum()),
-                "n_stage2_train": len(X_stage2_train),
-                "n_predicted": len(reconstructed_price),
-            }
+        predictions_dict[model_stage2.value]["predictions"].append(reconstructed_price)
+        predictions_dict[model_stage2.value]["baseline_predictions"].append(
+            quarter_hourly_window[BASELINE_PRED_COLUMNS[model_stage2]]
         )
+        predictions_dict[model_stage2.value]["actuals"].append(quarter_hourly_actual)
+
+
+        weekly_report: dict[str, object] = {
+            "prediction_start": prediction_start.isoformat(),
+            "prediction_end_exclusive": prediction_end.isoformat(),
+        }
+        for stg_val, stg_dict in predictions_dict.items():
+            stage_window_report = evaluate_holdout(
+                stg_dict["predictions"][-1],
+                stg_dict["actuals"][-1],
+                stg_dict["baseline_predictions"][-1],
+            )[0]
+            weekly_report[stg_val] = stage_window_report
+
+            num_prediction_days = 0
+            if stg_val == model_stage1.value:
+                num_prediction_days = pd.DatetimeIndex(hourly_window.index).floor("D").nunique()
+            if stg_val == model_stage2.value:
+                num_prediction_days = pd.DatetimeIndex(quarter_hourly_window.index).floor("D").nunique()
+
+            logger.info(
+                "Stage %s - window %s to %s (%s/%s days): MAE %.3f",
+                stg_val,
+                prediction_start.date(),
+                (prediction_end - pd.Timedelta(days=1)).date(),
+                num_prediction_days,
+                WEEKLY_PREDICTION_DAYS,
+                stage_window_report["mae"],
+            )
+
         weekly_reports.append(weekly_report)
-        predictions.append(reconstructed_price)
-        baseline_predictions.append(quarter_window["price_lag_96qh"])
-        actuals.append(quarter_actual)
-        annotated_windows.append(quarter_window)
 
         final_stage1_pipeline = stage1_pipeline
         final_stage2_pipeline = stage2_pipeline
-        logger.info(
-            "Stage 2 window %s to %s (%s/%s days): MAE %.3f",
-            prediction_start.date(),
-            (prediction_end - pd.Timedelta(days=1)).date(),
-            quarter_window.index.floor("D").nunique(),
-            WEEKLY_PREDICTION_DAYS,
-            weekly_report["mae"],
-        )
 
-    if not predictions or final_stage1_pipeline is None or final_stage2_pipeline is None:
+    # Consolidating for the entire holdout period
+    if not predictions_dict or final_stage1_pipeline is None or final_stage2_pipeline is None:
         raise ValueError("No complete Stage 2 holdout windows were available for weekly training")
 
-    holdout_predictions = pd.concat(predictions).sort_index()
-    holdout_baseline_predictions = pd.concat(baseline_predictions).sort_index()
-    holdout_actuals = pd.concat(actuals).sort_index()
+    for stg_val, stg_dict in predictions_dict.items():
+        holdout_predictions = pd.concat(stg_dict["predictions"]).sort_index()
+        holdout_baseline_predictions = pd.concat(stg_dict["baseline_predictions"]).sort_index()
+        holdout_actuals = pd.concat(stg_dict["actuals"]).sort_index()
 
-    holdout_report, baseline_report = test_model(holdout_predictions, holdout_actuals, holdout_baseline_predictions, mode=model_type)
-    # report["holdout"] = regression_metrics(holdout_actuals, holdout_predictions)
-    report["holdout"] = holdout_report
-    report["baseline_persistence"] = baseline_report
+        holdout_report, baseline_report = evaluate_holdout(
+            holdout_predictions,
+            holdout_actuals,
+            holdout_baseline_predictions,
+        )
+        stg_report = {}
+        stg_report["holdout"] = holdout_report
+        stg_report["baseline_persistence"] = baseline_report
+        stg_report["n_holdout"] = len(holdout_actuals)
 
-    report["n_holdout"] = len(holdout_actuals)
+        if stg_val == model_stage1.value:
+            stg_report["n_features"] = final_stage1_pipeline.named_steps["model"].n_features_in_
+            stg_report["hyperparameters"] = final_stage1_pipeline.named_steps["model"].get_params()
+        if stg_val == model_stage2.value:
+            stg_report["n_features"] = final_stage2_pipeline.named_steps["model"].n_features_in_
+            stg_report["hyperparameters"] = final_stage2_pipeline.named_steps["model"].get_params()
+
+        report[f"{stg_val}"] = stg_report
+        draw_predictions(holdout_predictions, holdout_actuals, key_word=stg_val + "_weekly_expanding_window")
+
+        if tracking_run is not None:
+            tracking_run.log({f"{stg_val}/{key}": val for key, val in stg_report.items()})
+
+    # Save the final report and weekly reports for the entire holdout period
     report["weekly_holdout"] = weekly_reports
-    report["n_features"] = final_stage2_pipeline.named_steps["model"].n_features_in_
-    report["hyperparameters"] = final_stage2_pipeline.named_steps["model"].get_params()
+    save_report(report, "price_forecast_model_report")
 
-    save_report(report, mode=model_type)
-    draw_predictions(holdout_predictions, holdout_actuals, mode=model_type)
-
-    stage1_s3_uri = save_pipeline(final_stage1_pipeline, model_type=ModelType.PRICE_HOURLY)
-    stage2_s3_uri = save_pipeline(final_stage2_pipeline, model_type=model_type, metadata=report)
+    stage1_s3_uri = save_pipeline(final_stage1_pipeline, model_type=model_stage1)
+    stage2_s3_uri = save_pipeline(final_stage2_pipeline, model_type=model_stage2, metadata=report)
     logger.info("Saved weekly Stage 1 pipeline to %s", stage1_s3_uri)
     logger.info("Saved weekly Stage 2 pipeline to %s", stage2_s3_uri)
 
     if tracking_run is not None:
-        log_training_report(tracking_run, report)
         tracking_run.summary["stage1_model_s3_uri"] = stage1_s3_uri
         tracking_run.summary["stage2_model_s3_uri"] = stage2_s3_uri
         tracking_run.finish()
@@ -287,6 +372,7 @@ def run_hourly_price_model_training(raw, wandb_track: bool = True):
     report: dict[str, object] = {
             "model": f"{model_type.value}_forecast",
             "trained_at": train_start_time.isoformat(),
+            "backtest": "single_window"
         }
 
     if wandb_track:
@@ -341,12 +427,12 @@ def run_hourly_price_model_training(raw, wandb_track: bool = True):
     y_pred = pipeline.predict(X_test)
     test_baseline_pred = X_test["price_lag_24h"]  # yesterday, same hour
     
-    holdout_report, baseline_report = test_model(y_pred, y_test, test_baseline_pred, mode=model_type)
+    holdout_report, baseline_report = evaluate_holdout(y_pred, y_test, test_baseline_pred)
     report["holdout"] = holdout_report
     report["baseline_persistence"] = baseline_report
 
-    save_report(report, mode=model_type)
-    draw_predictions(y_pred, y_test, mode=model_type)
+    save_report(report, model_type)
+    draw_predictions(y_pred, y_test, key_word=model_type.value + "_single_window")
 
     s3_uri = save_pipeline(pipeline, model_type=model_type, metadata=report)
     logger.info(f"Model saved to {s3_uri}")
@@ -362,16 +448,16 @@ if __name__ == "__main__":
 
     hourly_raw = load_hourly_price_model_features(
         start_date=STAGE1_START_DATE,
-        end_date_exclusive="2026-04-01",
+        end_date_exclusive=HOLDOUT_END_DATE_EXCLUSIVE,
         filter_by_local_timestamp=True,
     )
     quarter_hourly_raw = load_quarter_hour_price_model_features(
         start_date=STAGE2_START_DATE,
-        end_date_exclusive="2026-04-01",
+        end_date_exclusive=HOLDOUT_END_DATE_EXCLUSIVE,
         filter_by_local_timestamp=True,
     )
     logger.info("Loaded hourly data with %d rows and %d columns", *hourly_raw.shape)
     logger.info("Loaded quarter-hour data with %d rows and %d columns", *quarter_hourly_raw.shape)
 
     # run_hourly_price_model_training(hourly_raw, wandb_track=False)
-    run_quarter_hourly_price_model_training(hourly_raw, quarter_hourly_raw, wandb_track=False)
+    run_price_model_training(hourly_raw, quarter_hourly_raw, wandb_track=True)

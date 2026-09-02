@@ -30,6 +30,11 @@ TARGET_COLUMNS = {
     ModelType.SOLAR: "solar_mw",
 }
 
+BASELINE_PRED_COLUMNS = {
+    ModelType.PRICE_HOURLY: "price_lag_24h",
+    ModelType.PRICE_QUARTER_HOURLY: "price_lag_96qh",
+}
+
 # 14 current-hour generation/consumption signals — all leak against every target.
 LEAKING_GEN_COLS = [
     "wind_total_mw",
