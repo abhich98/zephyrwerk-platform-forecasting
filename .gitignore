@@ -10,6 +10,7 @@ build/
 # Log
 pipeline.log
 logs
+wandb/
 
 # Virtual environments / uv
 .venv/
