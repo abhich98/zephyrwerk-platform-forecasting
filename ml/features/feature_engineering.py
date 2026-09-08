@@ -204,11 +204,12 @@ class QuarterHourPriceModelFeatureEngineer(BaseEstimator, TransformerMixin):
         df = X.copy()
         local_index = pd.DatetimeIndex(df.index)
         hour = local_index.hour
+        minute = local_index.minute
         day_of_week = local_index.dayofweek
         month = local_index.month
 
-        df["hour_sin"] = np.sin(2 * np.pi * hour / 24)
-        df["hour_cos"] = np.cos(2 * np.pi * hour / 24)
+        df["hour_sin"] = np.sin(2 * np.pi * (hour + minute / 60) / 24)
+        df["hour_cos"] = np.cos(2 * np.pi * (hour + minute / 60) / 24)
         df["dow_sin"] = np.sin(2 * np.pi * day_of_week / 7)
         df["dow_cos"] = np.cos(2 * np.pi * day_of_week / 7)
         df["month_sin"] = np.sin(2 * np.pi * (month - 1) / 12)
