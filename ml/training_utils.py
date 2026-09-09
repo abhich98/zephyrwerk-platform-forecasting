@@ -1,5 +1,6 @@
 import json
 from enum import Enum
+import logging
 from pathlib import Path
 from typing import overload
 
@@ -11,12 +12,37 @@ from xgboost import XGBRegressor
 from ml.evaluate import baseline_persistence, directional_accuracy, full_evaluation_report
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
 class ModelType(Enum):
     PRICE_HOURLY = "price_hourly"
     PRICE_QUARTER_HOURLY = "price_quarter_hourly"
     PRICE = "price"
     WIND = "wind"
     SOLAR = "solar"
+
+
+def fill_short_feature_gaps(raw: pd.DataFrame, omit_columns: list[str] | None = None, verbose: bool = False) -> pd.DataFrame:
+    """Fill only short gaps while preserving the realized target unchanged."""
+    filled = raw.copy()
+    for column in filled.columns:
+        if omit_columns and column in omit_columns:
+            continue
+        if not pd.api.types.is_numeric_dtype(filled[column]):
+            continue
+        if filled[column].isna().any():
+            if verbose:
+                logger.info("Column %s has %d missing values before near fill", column, filled[column].isna().sum())
+            filled[column] = filled[column].ffill(limit=3)
+            if verbose:
+                logger.info("Column %s has %d missing values after near fill", column, filled[column].isna().sum())
+
+    return filled
 
 
 def filter_raw_data(X_raw, y_raw, mode: ModelType):
@@ -39,6 +65,7 @@ def filter_raw_data(X_raw, y_raw, mode: ModelType):
     y = y_raw.loc[valid_idx]
 
     return X_raw, y
+
 
 def create_preprocessor():
     """
@@ -71,8 +98,8 @@ def create_ml_model():
         n_estimators=500,
         learning_rate=0.05,
         max_depth=6,
-        subsample=0.8,
-        colsample_bytree=0.8,
+        subsample=0.8, # confirmed to introducing some randomness i.e, eval results vary slightly on repeated runs
+        colsample_bytree=1.0,
         min_child_weight=5,
         reg_alpha=0.0,
         reg_lambda=1.0,
@@ -82,6 +109,22 @@ def create_ml_model():
     )
     model = XGBRegressor(**xgb_params)
     return model
+
+
+def broadcast_predictions_h2qh(
+    quarter_hour_index: pd.DatetimeIndex,
+    hourly_predictions: pd.Series,
+) -> pd.Series:
+    """Broadcast each hourly Stage 1 point forecast to its four quarter-hours."""
+    hourly_by_start = hourly_predictions.copy()
+    hourly_by_start.index = pd.DatetimeIndex(hourly_by_start.index).floor("h")
+    hourly_prediction_map = hourly_by_start.to_dict()
+    quarter_hours = pd.DatetimeIndex(quarter_hour_index).floor("h")
+    return pd.Series(
+        quarter_hours.map(hourly_prediction_map),
+        index=quarter_hour_index,
+        name="stage1_prediction",
+    )
 
 
 @overload

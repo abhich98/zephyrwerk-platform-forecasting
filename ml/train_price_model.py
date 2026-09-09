@@ -21,8 +21,10 @@ from ml.features.feature_engineering import (
 from ml.s3_model_io import save_pipeline
 from ml.training_utils import (
     ModelType,
+    fill_short_feature_gaps,
     create_ml_model,
     create_preprocessor,
+    broadcast_predictions_h2qh,
     draw_predictions,
     save_report,
     evaluate_holdout,
@@ -50,62 +52,30 @@ WEEK_START_DAY_IDX = 0 # Monday
 def _create_price_pipeline(engineer):
     """Create a fresh point-forecast pipeline for one training window."""
     return Pipeline([
-        ("engineer", engineer),
+        ("engineer", engineer()),
         ("preprocess", create_preprocessor()),
         ("model", create_ml_model()),
     ])
 
 
-def _fill_short_feature_gaps(raw: pd.DataFrame, omit_columns: list[str] | None = None) -> pd.DataFrame:
-    """Fill only short gaps while preserving the realized target unchanged."""
-    filled = raw.copy()
-    for column in filled.columns:
-        if omit_columns and column in omit_columns:
-            continue
-        if not pd.api.types.is_numeric_dtype(filled[column]):
-            continue
-        if filled[column].isna().any():
-            logger.info("Column %s has %d missing values before near fill", column, filled[column].isna().sum())
-            filled[column] = filled[column].ffill(limit=3)
-            logger.info("Column %s has %d missing values after near fill", column, filled[column].isna().sum())
-
-    return filled
-
-
 def _predict_stage1_for_window(
     hourly_raw: pd.DataFrame,
     prediction_start: pd.Timestamp,
-    prediction_end: pd.Timestamp,
+    prediction_end_exclusive: pd.Timestamp,
 )-> tuple[Pipeline, pd.Series]:
     """Fit Stage 1 only on rows before a weekly prediction window."""
 
     train_raw = hourly_raw.loc[hourly_raw.index < prediction_start]
     X_train, y_train = split_x_y(train_raw, model_type=ModelType.PRICE_HOURLY)
-    pipeline = _create_price_pipeline(HourlyPriceModelFeatureEngineer())
+    pipeline = _create_price_pipeline(HourlyPriceModelFeatureEngineer)
     pipeline.fit(X_train, y_train)
 
     window_raw = hourly_raw.loc[
-        (hourly_raw.index >= prediction_start) & (hourly_raw.index < prediction_end)
+        (hourly_raw.index >= prediction_start) & (hourly_raw.index < prediction_end_exclusive)
     ]
     X_window, _ = split_x_y(window_raw, model_type=ModelType.PRICE_HOURLY)
     predictions = pd.Series(pipeline.predict(X_window), index=X_window.index, name="stage1_prediction")
     return pipeline, predictions
-
-
-def _broadcast_hourly_predictions(
-    quarter_hour_index: pd.DatetimeIndex,
-    hourly_predictions: pd.Series,
-) -> pd.Series:
-    """Broadcast each hourly Stage 1 point forecast to its four quarter-hours."""
-    hourly_by_start = hourly_predictions.copy()
-    hourly_by_start.index = pd.DatetimeIndex(hourly_by_start.index).floor("h")
-    hourly_prediction_map = hourly_by_start.to_dict()
-    quarter_hours = pd.DatetimeIndex(quarter_hour_index).floor("h")
-    return pd.Series(
-        quarter_hours.map(hourly_prediction_map),
-        index=quarter_hour_index,
-        name="stage1_prediction",
-    )
 
 
 def _build_weekly_starts(holdout_start: pd.Timestamp, holdout_end: pd.Timestamp) -> pd.DatetimeIndex:
@@ -131,6 +101,37 @@ def _build_weekly_starts(holdout_start: pd.Timestamp, holdout_end: pd.Timestamp)
     )
 
     return pd.DatetimeIndex(training_week_starts.append(holdout_week_starts))
+
+
+def _build_pred_windows() -> tuple[pd.DatetimeIndex, pd.DatetimeIndex]:
+    """Build prediction-windows (start and end_exclusives) from warmup and holdout periods. They are weekly for now, but could be a different length in the future."""
+    stage2_start = pd.Timestamp(STAGE2_START_DATE)
+    holdout_start = pd.Timestamp(HOLDOUT_START_DATE)
+    holdout_end_ex = pd.Timestamp(HOLDOUT_END_DATE_EXCLUSIVE)
+
+    training_week_starts = pd.DatetimeIndex([STAGE2_START_DATE]).append(
+        pd.date_range(
+            start=stage2_start + pd.Timedelta(days=WEEKLY_PREDICTION_DAYS - stage2_start.weekday()),
+            end=holdout_start,
+            freq=f"{WEEKLY_PREDICTION_DAYS}D",
+            inclusive="left",
+        )
+    )
+
+    holdout_week_starts = pd.DatetimeIndex([HOLDOUT_START_DATE]).append(
+        pd.date_range(
+            start=holdout_start + pd.Timedelta(days=WEEKLY_PREDICTION_DAYS - holdout_start.weekday()),
+            end=holdout_end_ex,
+            freq=f"{WEEKLY_PREDICTION_DAYS}D",
+            inclusive="left",
+        )
+    )
+
+    week_starts = pd.DatetimeIndex(training_week_starts.append(holdout_week_starts)).sort_values()
+    week_ends_ex = week_starts[1:].append(pd.DatetimeIndex([holdout_end_ex]))
+    week_ends_ex = week_ends_ex.unique().sort_values()
+
+    return week_starts, week_ends_ex
 
 
 def _initialize_predictions_store(*model_types: ModelType) -> dict[str, dict[str, list[pd.Series]]]:
@@ -180,17 +181,18 @@ def run_price_model_training(
         tracking_run.config.update(report)
 
     logger.info("%sFilling short gaps and dropping incomplete days in hourly data%s", "*" * 10, "*" * 10)
-    hourly_raw = drop_incomplete_days(_fill_short_feature_gaps(hourly_raw, omit_columns=["price_eur_mwh"]))
+    hourly_raw = drop_incomplete_days(fill_short_feature_gaps(hourly_raw, omit_columns=["price_eur_mwh"], verbose=True))
     logger.info(
         "%sFilling short gaps and dropping incomplete days in quarter-hourly data%s",
         "*" * 10,
         "*" * 10,
     )
-    quarter_hourly_raw = drop_incomplete_days(_fill_short_feature_gaps(quarter_hourly_raw, omit_columns=["price_eur_mwh"]))
+    quarter_hourly_raw = drop_incomplete_days(fill_short_feature_gaps(quarter_hourly_raw, omit_columns=["price_eur_mwh"], verbose=True))
 
     holdout_start = pd.Timestamp(HOLDOUT_START_DATE)
     holdout_end = pd.Timestamp(HOLDOUT_END_DATE_EXCLUSIVE)
-    weekly_starts = _build_weekly_starts(holdout_start=holdout_start, holdout_end=holdout_end)
+    # weekly_starts = _build_weekly_starts(holdout_start=holdout_start, holdout_end=holdout_end)
+    pred_windows = _build_pred_windows()
 
     annotated_windows: list[pd.DataFrame] = []
     predictions_dict = _initialize_predictions_store(model_stage1, model_stage2)
@@ -198,22 +200,17 @@ def run_price_model_training(
     final_stage1_pipeline = None
     final_stage2_pipeline = None
 
-    for prediction_start in weekly_starts:
+    for prediction_start, prediction_end_exc in zip(*pred_windows):
         if prediction_start <= hourly_raw.index.min().normalize():
             continue
         if prediction_start <= quarter_hourly_raw.index.min().normalize():
             continue
 
-        prediction_end = min(
-            prediction_start + pd.Timedelta(days=WEEKLY_PREDICTION_DAYS),
-            holdout_end,
-        )
-
         hourly_window = hourly_raw.loc[
-            (hourly_raw.index >= prediction_start) & (hourly_raw.index < prediction_end)
+            (hourly_raw.index >= prediction_start) & (hourly_raw.index < prediction_end_exc)
         ].copy()
         quarter_hourly_window = quarter_hourly_raw.loc[
-            (quarter_hourly_raw.index >= prediction_start) & (quarter_hourly_raw.index < prediction_end)
+            (quarter_hourly_raw.index >= prediction_start) & (quarter_hourly_raw.index < prediction_end_exc)
         ].copy()
 
         if hourly_window.empty:
@@ -223,15 +220,15 @@ def run_price_model_training(
         stage1_pipeline, stage1_predictions = _predict_stage1_for_window(
             hourly_raw,
             prediction_start,
-            prediction_end,
+            prediction_end_exc,
         )
-        quarter_hourly_window["stage1_prediction"] = _broadcast_hourly_predictions(
+        quarter_hourly_window["stage1_prediction"] = broadcast_predictions_h2qh(
             pd.DatetimeIndex(quarter_hourly_window.index),
             stage1_predictions,
         )
 
         if quarter_hourly_window.empty:
-            logger.warning("Skipping %s because its quarter-hour rows are incomplete", prediction_start.date())
+            logger.warning("Skipping %s because its quarter-hourly rows are incomplete", prediction_start.date())
             continue
 
         annotated_windows.append(quarter_hourly_window)
@@ -265,7 +262,7 @@ def run_price_model_training(
         )
         stage1_window_prediction = X_stage2_window.pop("stage1_prediction")
 
-        stage2_pipeline = _create_price_pipeline(QuarterHourPriceModelFeatureEngineer())
+        stage2_pipeline = _create_price_pipeline(QuarterHourPriceModelFeatureEngineer)
         stage2_pipeline.fit(X_stage2_train, stage2_deviation_train)
         reconstructed_price = pd.Series(
             stage1_window_prediction.to_numpy() + stage2_pipeline.predict(X_stage2_window),
@@ -282,7 +279,7 @@ def run_price_model_training(
 
         weekly_report: dict[str, object] = {
             "prediction_start": prediction_start.isoformat(),
-            "prediction_end_exclusive": prediction_end.isoformat(),
+            "prediction_end_exclusive": prediction_end_exc.isoformat(),
         }
         for stg_val, stg_dict in predictions_dict.items():
             stage_window_report = evaluate_holdout(
@@ -299,12 +296,12 @@ def run_price_model_training(
                 num_prediction_days = pd.DatetimeIndex(quarter_hourly_window.index).floor("D").nunique()
 
             logger.info(
-                "Stage %s - window %s to %s (%s/%s days): MAE %.3f",
+                "Stage %s - window %s to %s (exclusive) (%s/%s days): MAE %.3f",
                 stg_val,
                 prediction_start.date(),
-                (prediction_end - pd.Timedelta(days=1)).date(),
+                prediction_end_exc.date(),
                 num_prediction_days,
-                WEEKLY_PREDICTION_DAYS,
+                (prediction_end_exc.date() - prediction_start.date()).days,
                 stage_window_report["mae"],
             )
 
@@ -329,7 +326,7 @@ def run_price_model_training(
         )
         stg_report = {}
         stg_report["holdout"] = holdout_report
-        stg_report["baseline_persistence"] = baseline_report
+        stg_report["holdout"]["baseline_persistence"] = baseline_report
         stg_report["n_holdout"] = len(holdout_actuals)
 
         if stg_val == model_stage1.value:
@@ -384,7 +381,7 @@ def run_hourly_price_model_training(raw, wandb_track: bool = True):
 
     logger.info("Starting training for model type: %s with %d rows and %d columns raw data", model_type.value, *raw.shape)
     # Preprocess the data
-    raw = _fill_short_feature_gaps(raw, omit_columns=["price_eur_mwh"])
+    raw = fill_short_feature_gaps(raw, omit_columns=["price_eur_mwh"])
     raw = drop_incomplete_days(raw)
     X_raw, y = split_x_y(raw, model_type=model_type)
 
@@ -460,4 +457,4 @@ if __name__ == "__main__":
     logger.info("Loaded quarter-hour data with %d rows and %d columns", *quarter_hourly_raw.shape)
 
     # run_hourly_price_model_training(hourly_raw, wandb_track=False)
-    run_price_model_training(hourly_raw, quarter_hourly_raw, wandb_track=True)
+    run_price_model_training(hourly_raw, quarter_hourly_raw, wandb_track=False)
