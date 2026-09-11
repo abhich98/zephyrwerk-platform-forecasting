@@ -96,11 +96,13 @@ def _fetch_weather_chunked(start_date: datetime, end_date: datetime) -> pd.DataF
     """Fetch weather data, chunking by year to stay within Open-Meteo's practical range limits."""
     frames = []
     chunk_start = start_date
-    while chunk_start <= end_date:
+    end_date_local = min(end_date, datetime.now(timezone.utc))
+
+    while chunk_start <= end_date_local:
         # chunk boundary = end of chunk_start's year, or end_date, whichever is sooner
         chunk_end = min(
             datetime(chunk_start.year, 12, 31, 23, 59, 59, tzinfo=timezone.utc),
-            end_date,
+            end_date_local,
         )
         logger.info(f"Fetching weather for {chunk_start.date()} → {chunk_end.date()}")
         df = fetch_historical_weather(chunk_start, chunk_end)
@@ -111,6 +113,7 @@ def _fetch_weather_chunked(start_date: datetime, end_date: datetime) -> pd.DataF
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
+
 
 def _run_dbt(command: str) -> None:
     logger.info(f"Starting: dbt {command}")
@@ -128,6 +131,11 @@ def _run_dbt(command: str) -> None:
     logger.info(f"Completed: dbt {command}")
 
 def run_pipeline(start_date: datetime, end_date: datetime):
+    """
+    end_date: datetime
+        Here the end_date is exclusive in the sense that, although data for that timestamp may be loaded, but the data for the whole date will not be included.
+    """
+
     create_bucket_if_not_exists()  # Ensure the S3 bucket exists before uploading
 
     start_time = datetime.now()
@@ -139,7 +147,7 @@ def run_pipeline(start_date: datetime, end_date: datetime):
 
     # HOURLY DATA
     logger.info(f"Fetching SMARD data for {start_date.date()} (UTC) → {end_date.date()} (UTC)")
-    smard_data = fetch_range(start_date=start_date, end_date=end_date)
+    smard_data = fetch_range(start_date=start_date, end_date=end_date, resolution=RESOLUTION.HOUR)
     logger.info(f"SMARD fetch done: {len(smard_data)} rows")
 
     # ── Split by day and upload (skipping days already in S3) ───────────

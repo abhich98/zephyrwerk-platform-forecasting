@@ -12,7 +12,7 @@ from xgboost import XGBRegressor
 
 from ml.data_access import (
     load_hourly_price_model_features,
-    load_quarter_hour_price_model_features,
+    load_quarter_hourly_price_model_features,
 )
 from ml.features.feature_engineering import (
     BASELINE_PRED_COLUMNS,
@@ -78,11 +78,13 @@ def _suggest_xgb_params(trial: optuna.Trial) -> dict[str, Any]:
 
 def _create_price_pipeline(engineer, model_params: dict[str, Any]) -> Pipeline:
     """Create a fresh point-forecast pipeline for one training window."""
-    return Pipeline([
-        ("engineer", engineer()),
-        ("preprocess", create_preprocessor()),
-        ("model", _build_xgb_from_params(model_params)),
-    ])
+    return Pipeline(
+        [
+            ("engineer", engineer()),
+            ("preprocess", create_preprocessor()),
+            ("model", _build_xgb_from_params(model_params)),
+        ]
+    )
 
 
 def _create_stage1_pipeline(model_params: dict[str, Any]) -> Pipeline:
@@ -104,7 +106,9 @@ def _predict_stage1_for_qh_index(
         return pd.Series(index=qh_index, dtype=float, name="stage1_prediction")
 
     X_hourly, _ = split_x_y(hourly_window, model_type=ModelType.PRICE_HOURLY)
-    hourly_pred = pd.Series(stage1_pipeline.predict(X_hourly), index=X_hourly.index, name="hourly_pred")
+    hourly_pred = pd.Series(
+        stage1_pipeline.predict(X_hourly), index=X_hourly.index, name="hourly_pred"
+    )
     return broadcast_predictions_h2qh(pd.DatetimeIndex(qh_index), hourly_pred)
 
 
@@ -119,7 +123,9 @@ def _objective_stage1(
     splitter = TimeSeriesSplit(n_splits=cv_splits, gap=24)
 
     fold_mae: list[float] = []
-    for fold_idx, (train_idx, test_idx) in enumerate(splitter.split(X_stage1_trainval), start=1):
+    for fold_idx, (train_idx, test_idx) in enumerate(
+        splitter.split(X_stage1_trainval), start=1
+    ):
         X_train = X_stage1_trainval.iloc[train_idx]
         y_train = y_stage1_trainval.iloc[train_idx]
         X_test = X_stage1_trainval.iloc[test_idx]
@@ -147,7 +153,9 @@ def _objective_stage2(
     qh_splitter = TimeSeriesSplit(n_splits=cv_splits, gap=4)
     fold_mae: list[float] = []
 
-    for fold_idx, (train_idx, test_idx) in enumerate(qh_splitter.split(qh_trainval_raw), start=1):
+    for fold_idx, (train_idx, test_idx) in enumerate(
+        qh_splitter.split(qh_trainval_raw), start=1
+    ):
         qh_train_fold = qh_trainval_raw.iloc[train_idx].copy()
         qh_test_fold = qh_trainval_raw.iloc[test_idx].copy()
 
@@ -155,11 +163,15 @@ def _objective_stage2(
             continue
 
         stage1_train_end = qh_train_fold.index.max().floor("h")
-        hourly_fold_train = hourly_trainval_raw.loc[hourly_trainval_raw.index <= stage1_train_end]
+        hourly_fold_train = hourly_trainval_raw.loc[
+            hourly_trainval_raw.index <= stage1_train_end
+        ]
         if hourly_fold_train.empty:
             continue
 
-        X_hourly_fold_train, y_hourly_fold_train = split_x_y(hourly_fold_train, model_type=ModelType.PRICE_HOURLY)
+        X_hourly_fold_train, y_hourly_fold_train = split_x_y(
+            hourly_fold_train, model_type=ModelType.PRICE_HOURLY
+        )
         stage1_fold_pipeline = _create_stage1_pipeline(best_stage1_params)
         stage1_fold_pipeline.fit(X_hourly_fold_train, y_hourly_fold_train)
 
@@ -180,8 +192,12 @@ def _objective_stage2(
         if qh_train_fold.empty or qh_test_fold.empty:
             continue
 
-        X_stage2_train, y_stage2_train_price = split_x_y(qh_train_fold, model_type=ModelType.PRICE_QUARTER_HOURLY)
-        X_stage2_test, y_stage2_test_price = split_x_y(qh_test_fold, model_type=ModelType.PRICE_QUARTER_HOURLY)
+        X_stage2_train, y_stage2_train_price = split_x_y(
+            qh_train_fold, model_type=ModelType.PRICE_QUARTER_HOURLY
+        )
+        X_stage2_test, y_stage2_test_price = split_x_y(
+            qh_test_fold, model_type=ModelType.PRICE_QUARTER_HOURLY
+        )
 
         stage1_pred_train = X_stage2_train.pop("stage1_prediction")
         stage1_pred_test = X_stage2_test.pop("stage1_prediction")
@@ -240,20 +256,26 @@ def tune_two_stage_price_models(
         end_date_exclusive=HOLDOUT_END_DATE_EXCLUSIVE,
         filter_by_local_timestamp=True,
     )
-    qh_raw = load_quarter_hour_price_model_features(
+    qh_raw = load_quarter_hourly_price_model_features(
         start_date=STAGE2_START_DATE,
         end_date_exclusive=HOLDOUT_END_DATE_EXCLUSIVE,
         filter_by_local_timestamp=True,
     )
 
-    hourly_raw = drop_incomplete_days(fill_short_feature_gaps(hourly_raw, omit_columns=["price_eur_mwh"]))
-    qh_raw = drop_incomplete_days(fill_short_feature_gaps(qh_raw, omit_columns=["price_eur_mwh"]))
+    hourly_raw = drop_incomplete_days(
+        fill_short_feature_gaps(hourly_raw, omit_columns=["price_eur_mwh"])
+    )
+    qh_raw = drop_incomplete_days(
+        fill_short_feature_gaps(qh_raw, omit_columns=["price_eur_mwh"])
+    )
 
     X_stage1_raw, y_stage1 = split_x_y(hourly_raw, model_type=ModelType.PRICE_HOURLY)
-    X_stage1_trainval, X_stage1_holdout, y_stage1_trainval, y_stage1_holdout = temporal_split(
-        X_stage1_raw,
-        y_stage1,
-        holdout_start_date=HOLDOUT_START_DATE,
+    X_stage1_trainval, X_stage1_holdout, y_stage1_trainval, y_stage1_holdout = (
+        temporal_split(
+            X_stage1_raw,
+            y_stage1,
+            holdout_start_date=HOLDOUT_START_DATE,
+        )
     )
 
     qh_trainval_raw, qh_holdout_raw, _, _ = temporal_split(
@@ -265,10 +287,18 @@ def tune_two_stage_price_models(
     if X_stage1_trainval.empty or qh_trainval_raw.empty:
         raise ValueError("Insufficient training rows for tuning after preprocessing")
 
-    logger.info("Starting Stage 1 tuning with %d trials and %d splits", n_trials, stage1_cv_splits)
-    stage1_study = optuna.create_study(direction="minimize", study_name="stage1_price_hourly")
+    logger.info(
+        "Starting Stage 1 tuning with %d trials and %d splits",
+        n_trials,
+        stage1_cv_splits,
+    )
+    stage1_study = optuna.create_study(
+        direction="minimize", study_name="stage1_price_hourly"
+    )
     stage1_study.optimize(
-        lambda trial: _objective_stage1(trial, X_stage1_trainval, y_stage1_trainval, stage1_cv_splits),
+        lambda trial: _objective_stage1(
+            trial, X_stage1_trainval, y_stage1_trainval, stage1_cv_splits
+        ),
         n_trials=n_trials,
         show_progress_bar=False,
     )
@@ -276,10 +306,22 @@ def tune_two_stage_price_models(
     best_stage1_params = stage1_study.best_params
     logger.info("Stage 1 best CV MAE: %.4f", stage1_study.best_value)
 
-    logger.info("Starting Stage 2 tuning with %d trials and %d splits", n_trials, stage2_cv_splits)
-    stage2_study = optuna.create_study(direction="minimize", study_name="stage2_price_quarter_hourly")
+    logger.info(
+        "Starting Stage 2 tuning with %d trials and %d splits",
+        n_trials,
+        stage2_cv_splits,
+    )
+    stage2_study = optuna.create_study(
+        direction="minimize", study_name="stage2_price_quarter_hourly"
+    )
     stage2_study.optimize(
-        lambda trial: _objective_stage2(trial, hourly_raw.loc[X_stage1_trainval.index], qh_trainval_raw, best_stage1_params, stage2_cv_splits),
+        lambda trial: _objective_stage2(
+            trial,
+            hourly_raw.loc[X_stage1_trainval.index],
+            qh_trainval_raw,
+            best_stage1_params,
+            stage2_cv_splits,
+        ),
         n_trials=n_trials,
         show_progress_bar=False,
     )
@@ -295,7 +337,9 @@ def tune_two_stage_price_models(
         index=X_stage1_holdout.index,
         name="price_eur_mwh_prediction",
     )
-    stage1_holdout_baseline = X_stage1_holdout[BASELINE_PRED_COLUMNS[ModelType.PRICE_HOURLY]]
+    stage1_holdout_baseline = X_stage1_holdout[
+        BASELINE_PRED_COLUMNS[ModelType.PRICE_HOURLY]
+    ]
     stage1_holdout_report, stage1_baseline_report = evaluate_holdout(
         stage1_holdout_pred,
         y_stage1_holdout,
@@ -315,11 +359,17 @@ def tune_two_stage_price_models(
         pd.DatetimeIndex(qh_holdout_with_stage1.index),
     )
 
-    qh_trainval_with_stage1 = qh_trainval_with_stage1.dropna(subset=["stage1_prediction"])
+    qh_trainval_with_stage1 = qh_trainval_with_stage1.dropna(
+        subset=["stage1_prediction"]
+    )
     qh_holdout_with_stage1 = qh_holdout_with_stage1.dropna(subset=["stage1_prediction"])
 
-    X_stage2_train, y_stage2_train_price = split_x_y(qh_trainval_with_stage1, model_type=ModelType.PRICE_QUARTER_HOURLY)
-    X_stage2_holdout, y_stage2_holdout_price = split_x_y(qh_holdout_with_stage1, model_type=ModelType.PRICE_QUARTER_HOURLY)
+    X_stage2_train, y_stage2_train_price = split_x_y(
+        qh_trainval_with_stage1, model_type=ModelType.PRICE_QUARTER_HOURLY
+    )
+    X_stage2_holdout, y_stage2_holdout_price = split_x_y(
+        qh_holdout_with_stage1, model_type=ModelType.PRICE_QUARTER_HOURLY
+    )
 
     stage1_train_for_stage2 = X_stage2_train.pop("stage1_prediction")
     stage1_holdout_for_stage2 = X_stage2_holdout.pop("stage1_prediction")
@@ -329,19 +379,28 @@ def tune_two_stage_price_models(
     final_stage2_pipeline.fit(X_stage2_train, y_stage2_train_deviation)
 
     stage2_holdout_reconstructed = pd.Series(
-        stage1_holdout_for_stage2.to_numpy() + final_stage2_pipeline.predict(X_stage2_holdout),
+        stage1_holdout_for_stage2.to_numpy()
+        + final_stage2_pipeline.predict(X_stage2_holdout),
         index=y_stage2_holdout_price.index,
         name="price_eur_mwh_prediction",
     )
-    stage2_holdout_baseline = qh_holdout_with_stage1[BASELINE_PRED_COLUMNS[ModelType.PRICE_QUARTER_HOURLY]]
+    stage2_holdout_baseline = qh_holdout_with_stage1[
+        BASELINE_PRED_COLUMNS[ModelType.PRICE_QUARTER_HOURLY]
+    ]
     stage2_holdout_report, stage2_baseline_report = evaluate_holdout(
         stage2_holdout_reconstructed,
         y_stage2_holdout_price,
         stage2_holdout_baseline,
     )
 
-    draw_predictions(stage1_holdout_pred, y_stage1_holdout, key_word="price_hourly_tuned_holdout")
-    draw_predictions(stage2_holdout_reconstructed, y_stage2_holdout_price, key_word="price_quarter_hourly_tuned_holdout")
+    draw_predictions(
+        stage1_holdout_pred, y_stage1_holdout, key_word="price_hourly_tuned_holdout"
+    )
+    draw_predictions(
+        stage2_holdout_reconstructed,
+        y_stage2_holdout_price,
+        key_word="price_quarter_hourly_tuned_holdout",
+    )
 
     report["stage1"] = {
         "best_cv_mae": float(stage1_study.best_value),
@@ -362,8 +421,14 @@ def tune_two_stage_price_models(
 
     save_report(report, "price_forecast_hyperparameter_tuning_report")
 
-    stage1_s3_uri = save_pipeline(final_stage1_pipeline, model_type=ModelType.PRICE_HOURLY, metadata=report)
-    stage2_s3_uri = save_pipeline(final_stage2_pipeline, model_type=ModelType.PRICE_QUARTER_HOURLY, metadata=report)
+    stage1_s3_uri = save_pipeline(
+        final_stage1_pipeline, model_type=ModelType.PRICE_HOURLY, metadata=report
+    )
+    stage2_s3_uri = save_pipeline(
+        final_stage2_pipeline,
+        model_type=ModelType.PRICE_QUARTER_HOURLY,
+        metadata=report,
+    )
     report["stage1"]["best_model_s3_uri"] = stage1_s3_uri
     report["stage2"]["best_model_s3_uri"] = stage2_s3_uri
     save_report(report, "price_forecast_hyperparameter_tuning_report")
@@ -388,10 +453,24 @@ def tune_two_stage_price_models(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Tune two-stage price forecasting models with Optuna")
-    parser.add_argument("--trials", type=int, default=20, help="Number of Optuna trials per stage")
-    parser.add_argument("--cv-splits-hourly", type=int, default=4, help="TimeSeriesSplit folds for CV hourly model")
-    parser.add_argument("--cv-splits-quarter-hourly", type=int, default=2, help="TimeSeriesSplit folds for CV quarter-hourly model")
+    parser = argparse.ArgumentParser(
+        description="Tune two-stage price forecasting models with Optuna"
+    )
+    parser.add_argument(
+        "--trials", type=int, default=20, help="Number of Optuna trials per stage"
+    )
+    parser.add_argument(
+        "--cv-splits-hourly",
+        type=int,
+        default=4,
+        help="TimeSeriesSplit folds for CV hourly model",
+    )
+    parser.add_argument(
+        "--cv-splits-quarter-hourly",
+        type=int,
+        default=2,
+        help="TimeSeriesSplit folds for CV quarter-hourly model",
+    )
     parser.add_argument(
         "--no-wandb",
         action="store_true",
@@ -406,5 +485,5 @@ if __name__ == "__main__":
         n_trials=args.trials,
         stage1_cv_splits=args.cv_splits_hourly,
         stage2_cv_splits=args.cv_splits_quarter_hourly,
-        wandb_track=False, #not args.no_wandb
+        wandb_track=False,  # not args.no_wandb
     )

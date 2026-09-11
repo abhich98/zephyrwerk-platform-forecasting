@@ -14,10 +14,14 @@ from ml.training_utils import ModelType
 logger = logging.getLogger(__name__)
 
 _s3_client = None
+
+
 def _get_s3_client():
     global _s3_client
     if _s3_client is None:
-        _s3_client = boto3.client("s3", endpoint_url=os.environ.get("AWS_ENDPOINT_URL") or None)
+        _s3_client = boto3.client(
+            "s3", endpoint_url=os.environ.get("AWS_ENDPOINT_URL") or None
+        )
     return _s3_client
 
 
@@ -61,14 +65,28 @@ def save_pipeline(pipeline, model_type: ModelType, metadata: dict | None = None)
         s3.upload_file(str(local_path), bucket, archive_model_key)
 
     if metadata is None:
-        logger.warning(f"Saving {model_name} without metadata — training report will be missing")
+        logger.warning(
+            f"Saving {model_name} without metadata — training report will be missing"
+        )
         metadata = {}
 
-    s3.put_object(Bucket=bucket, Key=archive_meta_key, Body=json.dumps(metadata, indent=2).encode("utf-8"))
+    s3.put_object(
+        Bucket=bucket,
+        Key=archive_meta_key,
+        Body=json.dumps(metadata, indent=2).encode("utf-8"),
+    )
 
     # latest/ always mirrors the archive copy just written
-    s3.copy_object(Bucket=bucket, Key=latest_model_key, CopySource={"Bucket": bucket, "Key": archive_model_key})
-    s3.copy_object(Bucket=bucket, Key=latest_meta_key, CopySource={"Bucket": bucket, "Key": archive_meta_key})
+    s3.copy_object(
+        Bucket=bucket,
+        Key=latest_model_key,
+        CopySource={"Bucket": bucket, "Key": archive_model_key},
+    )
+    s3.copy_object(
+        Bucket=bucket,
+        Key=latest_meta_key,
+        CopySource={"Bucket": bucket, "Key": archive_meta_key},
+    )
 
     logger.info(f"Saved pipeline {model_name} to s3://{bucket}/{archive_model_key}")
     return f"s3://{bucket}/{archive_model_key}"
@@ -81,13 +99,19 @@ def load_pipeline(model_type: ModelType, version: str = "latest") -> tuple:
     Returns a (pipeline, metadata) tuple.
     """
     if version != "latest" and not re.match(r"^\d{8}-\d{6}$", version):
-      raise ValueError(f"version must be 'latest' or format YYYYMMDD-HHMMSS, got: {version}")
+        raise ValueError(
+            f"version must be 'latest' or format YYYYMMDD-HHMMSS, got: {version}"
+        )
 
     bucket = _get_bucket_name()
     s3 = _get_s3_client()
 
     model_name = f"{model_type.value}_forecast"
-    prefix = f"models/{model_name}/latest" if version == "latest" else f"models/{model_name}/archive/{version}"
+    prefix = (
+        f"models/{model_name}/latest"
+        if version == "latest"
+        else f"models/{model_name}/archive/{version}"
+    )
     model_key = f"{prefix}/{model_name}.joblib"
     meta_key = f"{prefix}/metadata.json"
 

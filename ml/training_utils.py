@@ -9,8 +9,10 @@ from sklearn.compose import ColumnTransformer, make_column_selector
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 
-from ml.evaluate import baseline_persistence, directional_accuracy, full_evaluation_report
-
+from ml.evaluate import (
+    baseline_persistence,
+    full_evaluation_report,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,7 +29,9 @@ class ModelType(Enum):
     SOLAR = "solar"
 
 
-def fill_short_feature_gaps(raw: pd.DataFrame, omit_columns: list[str] | None = None, verbose: bool = False) -> pd.DataFrame:
+def fill_short_feature_gaps(
+    raw: pd.DataFrame, omit_columns: list[str] | None = None, verbose: bool = False
+) -> pd.DataFrame:
     """Fill only short gaps while preserving the realized target unchanged."""
     filled = raw.copy()
     for column in filled.columns:
@@ -37,10 +41,18 @@ def fill_short_feature_gaps(raw: pd.DataFrame, omit_columns: list[str] | None = 
             continue
         if filled[column].isna().any():
             if verbose:
-                logger.info("Column %s has %d missing values before near fill", column, filled[column].isna().sum())
+                logger.info(
+                    "Column %s has %d missing values before near fill",
+                    column,
+                    filled[column].isna().sum(),
+                )
             filled[column] = filled[column].ffill(limit=3)
             if verbose:
-                logger.info("Column %s has %d missing values after near fill", column, filled[column].isna().sum())
+                logger.info(
+                    "Column %s has %d missing values after near fill",
+                    column,
+                    filled[column].isna().sum(),
+                )
 
     return filled
 
@@ -52,15 +64,17 @@ def filter_raw_data(X_raw, y_raw, mode: ModelType):
     # Run the transformer ONCE to identify NaN rows, then drop from raw indices
     if mode == ModelType.PRICE:
         from ml.features.feature_engineering import PriceModelFeatureEngineer
+
         feature_engineer = PriceModelFeatureEngineer()
     elif mode == ModelType.WIND or mode == ModelType.SOLAR:
         from ml.features.feature_engineering import GenerationModelFeatureEngineer
+
         feature_engineer = GenerationModelFeatureEngineer()
 
     tmp = feature_engineer.transform(X_raw)
     valid_idx = tmp.dropna().index
     del tmp
-    
+
     X_raw = X_raw.loc[valid_idx]
     y = y_raw.loc[valid_idx]
 
@@ -76,16 +90,14 @@ def create_preprocessor():
     """
     preprocessor = ColumnTransformer(
         transformers=[
-            (
-                "num", StandardScaler(), 
-                make_column_selector(dtype_include="number")
-            ),
+            ("num", StandardScaler(), make_column_selector(dtype_include="number")),
         ],
         remainder="passthrough",
         verbose_feature_names_out=False,
     )
-    preprocessor.set_output(transform="pandas")   # keep as DataFrame for readability
+    preprocessor.set_output(transform="pandas")  # keep as DataFrame for readability
     return preprocessor
+
 
 def create_ml_model():
     """
@@ -98,14 +110,14 @@ def create_ml_model():
         n_estimators=500,
         learning_rate=0.05,
         max_depth=6,
-        subsample=0.8, # confirmed to introducing some randomness i.e, eval results vary slightly on repeated runs
+        subsample=0.8,  # confirmed to introducing some randomness i.e, eval results vary slightly on repeated runs
         colsample_bytree=1.0,
         min_child_weight=5,
         reg_alpha=0.0,
         reg_lambda=1.0,
         random_state=42,
         n_jobs=-1,
-        tree_method="hist",   # fast histogram-based training
+        tree_method="hist",  # fast histogram-based training
     )
     model = XGBRegressor(**xgb_params)
     return model
@@ -132,6 +144,7 @@ def save_report(report: dict, mode: ModelType) -> None: ...
 @overload
 def save_report(report: dict, file_name: str) -> None: ...
 
+
 def save_report(report: dict, target: ModelType | str) -> None:
     name = f"{target.value}_model_report" if isinstance(target, ModelType) else target
     file_path = f"ml/artifacts/{name}.json"
@@ -152,14 +165,18 @@ def evaluate_holdout(y_pred, y_true, test_baseline_pred):
     Returns:
         tuple: A tuple containing the holdout report and baseline report.
     """
-    
+
     holdout_report = full_evaluation_report(
-        y_true, y_pred, reference=test_baseline_pred,
-        include_directional=True, include_peak=False,
+        y_true,
+        y_pred,
+        reference=test_baseline_pred,
+        include_directional=True,
+        include_peak=False,
     )
     baseline_report = baseline_persistence(test_baseline_pred, y_true)
 
     return holdout_report, baseline_report
+
 
 def draw_predictions(y_pred, y_test, key_word: str):
     """
