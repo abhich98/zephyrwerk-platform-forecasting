@@ -55,7 +55,6 @@ The table below summarizes the key forecasting results from the reports in `ml/a
 
 - The repository’s **hourly models** (both single-window and Stage 1 in 2-stage backtest) outperform the article’s published 17.2 EUR/MWh reference MAE.
 - The **quarter-hour Stage 2 model** is slightly above 17.2 EUR/MWh, but still materially better than the article’s 21.4 EUR/MWh Re-Twin MAE and much better than previous-day baseline levels.
-- Overall, the results support the same practical conclusion as the article: **forecast accuracy is economically meaningful**, not just statistically meaningful.
 
 ## Notes on comparability
 

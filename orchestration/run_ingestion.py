@@ -15,7 +15,6 @@ Incremental: fetches yesterday's data only.
 
 import argparse
 import logging
-import subprocess
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -42,7 +41,7 @@ logging.basicConfig(
 
 def parser():
     arg_parser = argparse.ArgumentParser(
-        description="Run the data pipeline to fetch SMARD and weather data and upload to S3. The script receives dates in German/CET timezone, but converts them to UTC for processing."
+        description="Run the data pipeline to fetch SMARD and weather data and upload to S3. The script receives dates in UTC timezone and processes them in UTC."
         )
     arg_parser.add_argument("--start_date", 
                             type=str, 
@@ -52,10 +51,14 @@ def parser():
                             type=str, 
                             help="The end date in YYYY-MM-DD format. Required for full_backfill."
                         )
+    arg_parser.add_argument("--force_upload",
+                            action="store_true",
+                            help="Force upload of data even if it already exists in S3."
+                        )
     return arg_parser.parse_args()
 
 
-def _split_and_upload_by_day(df: pd.DataFrame, data_name: DATA_NAMES) -> None:
+def _split_and_upload_by_day(df: pd.DataFrame, data_name: DATA_NAMES, force_upload: bool = False) -> None:
     """Split a DataFrame by calendar day and upload each day's data to S3,
     skipping days that are already uploaded. For SMARD data, also groups by
     resolution so hourly and quarter-hourly files are written separately."""
@@ -74,7 +77,7 @@ def _split_and_upload_by_day(df: pd.DataFrame, data_name: DATA_NAMES) -> None:
         for (year, month, day, resolution), group in grouped:
             resolution_str = str(resolution)
             y, m, d = int(str(year)), int(str(month)), int(str(day))
-            if is_already_uploaded(data_name, y, m, d, resolution=resolution_str):
+            if not force_upload and is_already_uploaded(data_name, y, m, d, resolution=resolution_str):
                 logger.info(f"Skipping {y}-{m:02d}-{d:02d} {data_name.value} ({resolution_str}) — already uploaded")
                 continue
             upload_to_s3(group, data_name, resolution=resolution_str)
@@ -86,7 +89,7 @@ def _split_and_upload_by_day(df: pd.DataFrame, data_name: DATA_NAMES) -> None:
         ])
         for (year, month, day), group in grouped:
             y, m, d = int(str(year)), int(str(month)), int(str(day))
-            if is_already_uploaded(data_name, y, m, d):
+            if not force_upload and is_already_uploaded(data_name, y, m, d):
                 logger.info(f"Skipping {y}-{m:02d}-{d:02d} {data_name.value} — already uploaded")
                 continue
             upload_to_s3(group, data_name)
@@ -115,26 +118,7 @@ def _fetch_weather_chunked(start_date: datetime, end_date: datetime) -> pd.DataF
     return pd.concat(frames, ignore_index=True)
 
 
-def _run_dbt(command: str) -> None:
-    logger.info(f"Starting: dbt {command}")
-    try:
-        result = subprocess.run(
-            ["dbt", command, "--project-dir", "dbt", "--profiles-dir", "dbt"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        logger.info(result.stdout)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"dbt {command} failed:\n{e.stdout}\n{e.stderr}")
-        raise
-    logger.info(f"Completed: dbt {command}")
-
-def run_pipeline(start_date: datetime, end_date: datetime):
-    """
-    end_date: datetime
-        Here the end_date is exclusive in the sense that, although data for that timestamp may be loaded, but the data for the whole date will not be included.
-    """
+def run_pipeline(start_date: datetime, end_date: datetime, force_upload: bool):
 
     create_bucket_if_not_exists()  # Ensure the S3 bucket exists before uploading
 
@@ -151,7 +135,7 @@ def run_pipeline(start_date: datetime, end_date: datetime):
     logger.info(f"SMARD fetch done: {len(smard_data)} rows")
 
     # ── Split by day and upload (skipping days already in S3) ───────────
-    _split_and_upload_by_day(smard_data, DATA_NAMES.SMARD)
+    _split_and_upload_by_day(smard_data, DATA_NAMES.SMARD, force_upload=force_upload)
 
     # QUARTER-HOURLY DATA (only for dates after the switch date)
     start_date_for_quarter_hour = max(start_date, SMARD_QUARTER_HOUR_SWITCH_DATE)
@@ -160,14 +144,14 @@ def run_pipeline(start_date: datetime, end_date: datetime):
         smard_qh_data = fetch_range(start_date=start_date_for_quarter_hour, end_date=end_date, resolution=RESOLUTION.QUARTER_HOUR)
         logger.info(f"SMARD quarter-hourly fetch done: {len(smard_qh_data)} rows")
 
-        _split_and_upload_by_day(smard_qh_data, DATA_NAMES.SMARD)
+        _split_and_upload_by_day(smard_qh_data, DATA_NAMES.SMARD, force_upload=force_upload)
 
     # ── Fetch and upload historical weather data ─────────────
     logger.info(f"Fetching weather data for {start_date.date()} → {end_date.date()}")
     weather_data = _fetch_weather_chunked(start_date, end_date)
     logger.info(f"Weather fetch done: {len(weather_data)} rows")
 
-    _split_and_upload_by_day(weather_data, DATA_NAMES.WEATHER)
+    _split_and_upload_by_day(weather_data, DATA_NAMES.WEATHER, force_upload=force_upload)
 
     # ── Fetch and upload historical/current weather forecasts (leak-safe) ───────
     # These are the forecasts that were actually available at auction time,
@@ -177,32 +161,32 @@ def run_pipeline(start_date: datetime, end_date: datetime):
     weather_forecast_data = fetch_forecast_weather_2(start_date, end_date, run_utc_hour=0)
     logger.info(f"Weather forecast fetch done: {len(weather_forecast_data)} rows")
 
-    _split_and_upload_by_day(weather_forecast_data, DATA_NAMES.WEATHER_FORECAST)
+    _split_and_upload_by_day(weather_forecast_data, DATA_NAMES.WEATHER_FORECAST, force_upload=force_upload)
 
     # Load raw data from S3 into PostgreSQL
     load_range(start_date, end_date)
     end_time = datetime.now()
     logger.info(f"Pipeline completed in {end_time - start_time}")
 
-    # _run_dbt("run")  # Run dbt models to transform raw data into features
-    # _run_dbt("test")  # Run dbt tests to validate the transformed data
-
 
 if __name__ == "__main__":
-    # The scripte receives dates in German/CET timezone, but converts them to UTC for processing.
+    # The scripte receives dates in UTC timezome.
     args = parser()
     
     if args.start_date and args.end_date:
-        start_date = datetime.strptime(args.start_date, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Europe/Berlin"))
-        end_date = datetime.strptime(args.end_date, "%Y-%m-%d").replace(tzinfo=ZoneInfo("Europe/Berlin"))
+        start_date = datetime.strptime(args.start_date, "%Y-%m-%d").replace(tzinfo=ZoneInfo("UTC"))
+
+        end_date = datetime.strptime(args.end_date, "%Y-%m-%d").replace(tzinfo=ZoneInfo("UTC"))
+        end_date = end_date.replace(hour=23, minute=59, second=59)
 
     elif args.start_date or args.end_date:
         raise ValueError("Provide both --start_date and --end_date or neither.")
     else:
-        start_date = datetime.now(tz=ZoneInfo("Europe/Berlin")).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-        end_date = datetime.now(tz=ZoneInfo("Europe/Berlin"))
+        start_date = datetime.now(tz=ZoneInfo("UTC")).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        end_date = datetime.now(tz=ZoneInfo("UTC"))
 
     run_pipeline(
-        start_date=start_date.astimezone(timezone.utc), 
-        end_date=end_date.astimezone(timezone.utc)
+        start_date=start_date, 
+        end_date=end_date,
+        force_upload=args.force_upload
         )

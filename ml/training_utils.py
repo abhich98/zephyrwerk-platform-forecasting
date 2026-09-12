@@ -57,30 +57,6 @@ def fill_short_feature_gaps(
     return filled
 
 
-def filter_raw_data(X_raw, y_raw, mode: ModelType):
-    # Imported here, not at module scope: feature_engineering imports ModelType
-    # from this module, so a top-level import back would be circular.
-
-    # Run the transformer ONCE to identify NaN rows, then drop from raw indices
-    if mode == ModelType.PRICE:
-        from ml.features.feature_engineering import PriceModelFeatureEngineer
-
-        feature_engineer = PriceModelFeatureEngineer()
-    elif mode == ModelType.WIND or mode == ModelType.SOLAR:
-        from ml.features.feature_engineering import GenerationModelFeatureEngineer
-
-        feature_engineer = GenerationModelFeatureEngineer()
-
-    tmp = feature_engineer.transform(X_raw)
-    valid_idx = tmp.dropna().index
-    del tmp
-
-    X_raw = X_raw.loc[valid_idx]
-    y = y_raw.loc[valid_idx]
-
-    return X_raw, y
-
-
 def create_preprocessor():
     """
     Create a ColumnTransformer for preprocessing the features.
