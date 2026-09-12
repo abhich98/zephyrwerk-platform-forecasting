@@ -125,3 +125,80 @@ def load_pipeline(model_type: ModelType, version: str = "latest") -> tuple:
 
     logger.info(f"Loaded pipeline {model_name} from s3://{bucket}/{model_key}")
     return pipeline, metadata
+
+
+def save_best_hyperparameters(
+    model_type: ModelType,
+    params: dict,
+    metadata: dict | None = None,
+    wandb_run_id: str | None = None,
+) -> str:
+    """
+    Save tuned hyperparameters as a small, dedicated artifact.
+    Mirrors save_pipeline's latest/archive convention:
+      - s3://.../models/{model_name}/hyperparameters/latest/params.json
+      - s3://.../models/{model_name}/hyperparameters/archive/{YYYYMMDD-HHMMSS}/params.json
+    Returns the S3 URI of the archive copy.
+    """
+    bucket = _get_bucket_name()
+    s3 = _get_s3_client()
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    model_name = f"{model_type.value}_forecast"
+    archive_prefix = f"models/{model_name}/hyperparameters/archive/{timestamp}"
+    latest_prefix = f"models/{model_name}/hyperparameters/latest"
+
+    archive_key = f"{archive_prefix}/params.json"
+    latest_key = f"{latest_prefix}/params.json"
+
+    payload = {
+        "model_type": model_type.value,
+        "params": params,
+        "tuned_at": datetime.now(timezone.utc).isoformat(),
+        "wandb_run_id": wandb_run_id,
+        **(metadata or {}),
+    }
+    body = json.dumps(payload, indent=2).encode("utf-8")
+
+    s3.put_object(Bucket=bucket, Key=archive_key, Body=body)
+    s3.copy_object(
+        Bucket=bucket,
+        Key=latest_key,
+        CopySource={"Bucket": bucket, "Key": archive_key},
+    )
+
+    logger.info(
+        f"Saved best hyperparameters for {model_name} to s3://{bucket}/{archive_key}"
+    )
+    return f"s3://{bucket}/{archive_key}"
+
+
+def load_best_hyperparameters(model_type: ModelType, version: str = "latest") -> dict:
+    """
+    Download tuned hyperparameters from S3.
+    version: "latest" or an archive timestamp like "20260702-143012".
+    Returns the full payload dict (params, tuned_at, wandb_run_id, ...).
+    """
+    if version != "latest" and not re.match(r"^\d{8}-\d{6}$", version):
+        raise ValueError(
+            f"version must be 'latest' or format YYYYMMDD-HHMMSS, got: {version}"
+        )
+
+    bucket = _get_bucket_name()
+    s3 = _get_s3_client()
+
+    model_name = f"{model_type.value}_forecast"
+    prefix = (
+        f"models/{model_name}/hyperparameters/latest"
+        if version == "latest"
+        else f"models/{model_name}/hyperparameters/archive/{version}"
+    )
+    params_key = f"{prefix}/params.json"
+
+    params_obj = s3.get_object(Bucket=bucket, Key=params_key)
+    payload = json.loads(params_obj["Body"].read())
+
+    logger.info(
+        f"Loaded best hyperparameters for {model_name} from s3://{bucket}/{params_key}"
+    )
+    return payload

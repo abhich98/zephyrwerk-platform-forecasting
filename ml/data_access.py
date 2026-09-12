@@ -69,14 +69,6 @@ def load_hourly_price_model_features(
         filter_by_local_timestamp,
     )
 
-    valid_timestamps = pd.date_range(
-        start=pd.Timestamp(start_date), 
-        end=pd.Timestamp(end_date_exclusive), 
-        freq="1h", 
-        inclusive="left"
-        )
-    out_df = pd.DataFrame(index=valid_timestamps)
-
     timestamp_column = "local_timestamp" if filter_by_local_timestamp else "timestamp"
 
     try:
@@ -96,8 +88,29 @@ def load_hourly_price_model_features(
             df = pd.read_sql_query(text(query), conn, params=params)
             logger.info("Loaded %s hourly price-model rows from the database.", len(df))
 
+        # Generate the valid timestamp range based on the start and end dates
+        start_date = (
+            pd.Timestamp(start_date)
+            if start_date is not None
+            else df[timestamp_column].min()
+        )
+        end_date_exclusive = (
+            pd.Timestamp(end_date_exclusive)
+            if end_date_exclusive is not None
+            else df[timestamp_column].max() + pd.Timedelta(hours=1)
+        )
+
+        valid_timestamps = pd.date_range(
+            start=start_date,
+            end=end_date_exclusive,
+            freq="1h",
+            inclusive="left",
+        )
+        out_df = pd.DataFrame(index=valid_timestamps)
+
         out_df = out_df.join(df.set_index(timestamp_column), how="left")
         return out_df.sort_index()
+
     except Exception:
         logger.exception("Failed to load hourly price-model features")
         raise
@@ -117,20 +130,10 @@ def load_quarter_hourly_price_model_features(
         filter_by_local_timestamp,
     )
 
-    valid_timestamps = pd.date_range(
-        start=pd.Timestamp(start_date), 
-        end=pd.Timestamp(end_date_exclusive), 
-        freq="15min", 
-        inclusive="left"
-        )
-    out_df = pd.DataFrame(index=valid_timestamps)
-
     timestamp_column = "local_timestamp" if filter_by_local_timestamp else "timestamp"
 
     try:
-        query = (
-            "SELECT * FROM analytics.fct_ml_quarter_hourly_price_model_features WHERE 1=1"
-        )
+        query = "SELECT * FROM analytics.fct_ml_quarter_hourly_price_model_features WHERE 1=1"
         params: dict = {}
 
         if start_date:
@@ -147,6 +150,26 @@ def load_quarter_hourly_price_model_features(
             logger.info(
                 "Loaded %s quarter-hour price-model rows from the database.", len(df)
             )
+
+        # Generate the valid timestamp range based on the start and end dates
+        start_date = (
+            pd.Timestamp(start_date)
+            if start_date is not None
+            else df[timestamp_column].min()
+        )
+        end_date_exclusive = (
+            pd.Timestamp(end_date_exclusive)
+            if end_date_exclusive is not None
+            else df[timestamp_column].max() + pd.Timedelta(minutes=15)
+        )
+
+        valid_timestamps = pd.date_range(
+            start=start_date,
+            end=end_date_exclusive,
+            freq="15min",
+            inclusive="left",
+        )
+        out_df = pd.DataFrame(index=valid_timestamps)
 
         out_df = out_df.join(df.set_index(timestamp_column), how="left")
         return out_df.sort_index()

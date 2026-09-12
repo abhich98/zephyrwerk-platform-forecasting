@@ -2,10 +2,11 @@ import json
 from enum import Enum
 import logging
 from pathlib import Path
-from typing import overload
+from typing import Any, cast, overload
 
 import pandas as pd
 from sklearn.compose import ColumnTransformer, make_column_selector
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBRegressor
 
@@ -66,7 +67,11 @@ def create_preprocessor():
     """
     preprocessor = ColumnTransformer(
         transformers=[
-            ("num", StandardScaler(), make_column_selector(dtype_include="number")),
+            (
+                "num",
+                StandardScaler(),
+                make_column_selector(dtype_include=cast(Any, "number")),
+            ),
         ],
         remainder="passthrough",
         verbose_feature_names_out=False,
@@ -75,50 +80,102 @@ def create_preprocessor():
     return preprocessor
 
 
-def create_ml_model():
+DEFAULT_XGB_PARAMS = dict(
+    n_estimators=500,
+    learning_rate=0.05,
+    max_depth=6,
+    subsample=0.8,  # confirmed to introducing some randomness i.e, eval results vary slightly on repeated runs
+    colsample_bytree=1.0,
+    min_child_weight=5,
+    reg_alpha=0.0,
+    reg_lambda=1.0,
+    random_state=42,
+    n_jobs=-1,
+    tree_method="hist",  # fast histogram-based training
+)
+
+
+def create_ml_model(params: dict | None = None):
     """
-    Create an XGBRegressor model with predefined hyperparameters.
+    Create an XGBRegressor model, using tuned params where provided and
+    falling back to DEFAULT_XGB_PARAMS for any missing keys.
+
+    Args:
+        params (dict | None): Tuned hyperparameters overriding the defaults.
 
     Returns:
         XGBRegressor: A configured XGBRegressor model.
     """
-    xgb_params = dict(
-        n_estimators=500,
-        learning_rate=0.05,
-        max_depth=6,
-        subsample=0.8,  # confirmed to introducing some randomness i.e, eval results vary slightly on repeated runs
-        colsample_bytree=1.0,
-        min_child_weight=5,
-        reg_alpha=0.0,
-        reg_lambda=1.0,
-        random_state=42,
-        n_jobs=-1,
-        tree_method="hist",  # fast histogram-based training
-    )
+    xgb_params = {**DEFAULT_XGB_PARAMS, **(params or {})}
     model = XGBRegressor(**xgb_params)
     return model
 
 
+def create_price_pipeline(engineer, model_params: dict | None = None) -> Pipeline:
+    """Create a price forecasting pipeline with optional tuned parameters."""
+    return Pipeline(
+        [
+            ("engineer", engineer()),
+            ("preprocess", create_preprocessor()),
+            ("model", create_ml_model(model_params)),
+        ]
+    )
+
+
+def build_model_report(
+    *,
+    n_holdout: int,
+    hyperparameters: dict,
+    holdout_metrics: dict,
+    baseline_metrics: dict,
+    n_train: int | None = None,
+    n_features: int | None = None,
+    cv_mae: float | None = None,
+    hyperparameters_source: dict | None = None,
+    artifacts: dict | None = None,
+) -> dict:
+    """Build the shared per-model report schema used by training and tuning."""
+    report = {
+        "n_holdout": n_holdout,
+        "hyperparameters": hyperparameters,
+        "metrics": {
+            "holdout": holdout_metrics,
+            "baseline_persistence": baseline_metrics,
+        },
+    }
+    if n_train is not None:
+        report["n_train"] = n_train
+    if n_features is not None:
+        report["n_features"] = n_features
+    if cv_mae is not None:
+        report["cv_mae"] = cv_mae
+    if hyperparameters_source is not None:
+        report["hyperparameters_source"] = hyperparameters_source
+    if artifacts is not None:
+        report["artifacts"] = artifacts
+    return report
+
+
 def broadcast_predictions_h2qh(
-    quarter_hour_index: pd.DatetimeIndex,
+    qh_index: pd.DatetimeIndex,
     hourly_predictions: pd.Series,
 ) -> pd.Series:
     """Broadcast each hourly Stage 1 point forecast to its four quarter-hours."""
     hourly_by_start = hourly_predictions.copy()
     hourly_by_start.index = pd.DatetimeIndex(hourly_by_start.index).floor("h")
     hourly_prediction_map = hourly_by_start.to_dict()
-    quarter_hours = pd.DatetimeIndex(quarter_hour_index).floor("h")
+    quarter_hours = pd.DatetimeIndex(qh_index).floor("h")
     return pd.Series(
         quarter_hours.map(hourly_prediction_map),
-        index=quarter_hour_index,
-        name="stage1_prediction",
+        index=qh_index,
+        name="hourly_prediction",
     )
 
 
 @overload
-def save_report(report: dict, mode: ModelType) -> None: ...
+def save_report(report: dict, target: ModelType) -> None: ...
 @overload
-def save_report(report: dict, file_name: str) -> None: ...
+def save_report(report: dict, target: str) -> None: ...
 
 
 def save_report(report: dict, target: ModelType | str) -> None:
