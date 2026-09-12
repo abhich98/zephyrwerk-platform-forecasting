@@ -10,7 +10,7 @@ with generation_forecast_pivot as (
 
     MAX(value) FILTER(WHERE signal_name = 'RESIDUAL_LOAD_FC') as residual_load_forecast_mw,
     MAX(value) FILTER(WHERE signal_name = 'TOTAL_CONSUMPTION_FC') as total_consumption_forecast_mw
-  from {{ ref('stg_smard_generation_forecast') }}
+  from {{ ref('stg_smard_generation_load_forecast') }}
   group by timestamp, resolution
 )
 

@@ -30,7 +30,7 @@ with generation_pivot as (
       'OTHER_CONVENTIONAL',
       'OTHER_RENEWABLE'
     )) as total_generation_mw
-  from {{ ref('stg_smard_generation') }}
+  from {{ ref('stg_smard_generation_load') }}
   group by timestamp, resolution
 )
 
