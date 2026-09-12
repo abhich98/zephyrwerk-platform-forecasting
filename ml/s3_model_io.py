@@ -128,7 +128,7 @@ def load_pipeline(model_type: ModelType, version: str = "latest") -> tuple:
 
 
 def save_best_hyperparameters(
-    model_type: ModelType,
+    model_name: str,
     params: dict,
     metadata: dict | None = None,
     wandb_run_id: str | None = None,
@@ -144,7 +144,7 @@ def save_best_hyperparameters(
     s3 = _get_s3_client()
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    model_name = f"{model_type.value}_forecast"
+
     archive_prefix = f"models/{model_name}/hyperparameters/archive/{timestamp}"
     latest_prefix = f"models/{model_name}/hyperparameters/latest"
 
@@ -152,7 +152,7 @@ def save_best_hyperparameters(
     latest_key = f"{latest_prefix}/params.json"
 
     payload = {
-        "model_type": model_type.value,
+        "model_name": model_name,
         "params": params,
         "tuned_at": datetime.now(timezone.utc).isoformat(),
         "wandb_run_id": wandb_run_id,
@@ -173,7 +173,7 @@ def save_best_hyperparameters(
     return f"s3://{bucket}/{archive_key}"
 
 
-def load_best_hyperparameters(model_type: ModelType, version: str = "latest") -> dict:
+def load_best_hyperparameters(model_name: str, version: str = "latest") -> dict:
     """
     Download tuned hyperparameters from S3.
     version: "latest" or an archive timestamp like "20260702-143012".
@@ -187,7 +187,6 @@ def load_best_hyperparameters(model_type: ModelType, version: str = "latest") ->
     bucket = _get_bucket_name()
     s3 = _get_s3_client()
 
-    model_name = f"{model_type.value}_forecast"
     prefix = (
         f"models/{model_name}/hyperparameters/latest"
         if version == "latest"

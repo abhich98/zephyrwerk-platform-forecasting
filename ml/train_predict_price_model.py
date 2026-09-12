@@ -43,8 +43,9 @@ logger = logging.getLogger(__name__)
 
 HOURLY_START_DATE = "2023-05-01"
 QUARTER_HOURLY_START_DATE = "2025-10-01"
-HOLDOUT_START_DATE = "2026-09-01"
-HOLDOUT_END_DATE_EXCLUSIVE = "2026-09-11"
+HOLDOUT_START_DATE = "2026-01-01"
+HOLDOUT_END_DATE_EXCLUSIVE = "2026-04-01"
+
 WEEKLY_PREDICTION_DAYS = 7
 WEEK_START_DAY_IDX = 0  # Monday
 STAGE1_HOURLY_PARAMS_VERSION = os.environ.get("STAGE1_HOURLY_PARAMS_VERSION", "latest")
@@ -52,16 +53,16 @@ STAGE2_QH_PARAMS_VERSION = os.environ.get("STAGE2_QH_PARAMS_VERSION", "latest")
 
 
 def _load_tuned_hyperparameters(
-    model_type: ModelType, version: str
+    model_name: str, version: str
 ) -> tuple[dict | None, dict]:
     """Load tuned hyperparameters, falling back to defaults if unavailable."""
     try:
-        payload = load_best_hyperparameters(model_type, version=version)
+        payload = load_best_hyperparameters(model_name, version=version)
         return payload["params"], payload
     except Exception:
         logger.warning(
             "No tuned hyperparameters found for %s (version=%s); falling back to defaults",
-            model_type.value,
+            model_name,
             version,
         )
         return None, {}
@@ -156,10 +157,10 @@ def run_two_stage_price_model_training_prediction(
     train_start_time = datetime.now(timezone.utc)
 
     stage1_hourly_params, _ = _load_tuned_hyperparameters(
-        stage1_hourly_model_type, STAGE1_HOURLY_PARAMS_VERSION
+        f"stage1_{stage1_hourly_model_type.value}_forecast", STAGE1_HOURLY_PARAMS_VERSION
     )
     stage2_qh_params, _ = _load_tuned_hyperparameters(
-        stage2_qh_model_type, STAGE2_QH_PARAMS_VERSION
+        f"stage2_{stage2_qh_model_type.value}_forecast", STAGE2_QH_PARAMS_VERSION
     )
 
     report: dict[str, Any] = {
@@ -294,13 +295,13 @@ def run_two_stage_price_model_training_prediction(
             qh_train,
             model_type=stage2_qh_model_type,
         )
-        price_deviation_train = price_qh_train - X_qh_train.pop("hourly_prediction")
+        price_deviation_train = price_qh_train - X_qh_train.pop("stage1_hourly_prediction")
 
         X_qh_window, price_qh_actual = split_x_y(
             qh_window,
             model_type=stage2_qh_model_type,
         )
-        hourly_window_prediction = X_qh_window.pop("hourly_prediction")
+        hourly_window_prediction = X_qh_window.pop("stage1_hourly_prediction")
 
         qh_pipeline = create_price_pipeline(
             QuarterHourPriceModelFeatureEngineer, stage2_qh_params

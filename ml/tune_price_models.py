@@ -153,7 +153,7 @@ def tune_two_stage_price_models(
 
     wandb_run_id = tracking_run.id if tracking_run is not None else None
     hourly_params_s3_uri = save_best_hyperparameters(
-        model_type=stage1_hourly_model_type,
+        model_name=f"stage1_{stage1_hourly_model_type.value}_forecast",
         params=best_hourly_params,
         metadata={
             "cv_mae": float(price_hourly_study.best_value),
@@ -194,7 +194,7 @@ def tune_two_stage_price_models(
     logger.info("Quarter-hourly model best CV MAE: %.4f", price_qh_study.best_value)
 
     qh_params_s3_uri = save_best_hyperparameters(
-        model_type=stage2_qh_model_type,
+        model_name=f"stage2_{stage2_qh_model_type.value}_forecast",
         params=best_qh_params,
         metadata={
             "cv_mae": float(price_qh_study.best_value),
@@ -205,7 +205,7 @@ def tune_two_stage_price_models(
     )
     logger.info("Saved quarter-hourly best hyperparameters to %s", qh_params_s3_uri)
 
-    # Stage 3: Final model training and evaluation on holdout set
+    # Stage 3: Final model training, and evaluation on holdout set
     final_hourly_pipeline = create_hourly_pipeline(best_hourly_params)
     final_hourly_pipeline.fit(X_hourly_trainval, y_hourly_trainval)
 
@@ -273,12 +273,12 @@ def tune_two_stage_price_models(
     draw_predictions(
         prediction_hourly_holdout,
         y_hourly_holdout,
-        key_word="price_hourly_tuned_holdout",
+        key_word="price_hourly_tuned",
     )
     draw_predictions(
         prediction_qh_holdout,
         y_qh_holdout_price,
-        key_word="price_quarter_hourly_tuned_holdout",
+        key_word="price_quarter_hourly_tuned",
     )
 
     hourly_model_s3_uri = save_pipeline(
@@ -340,12 +340,12 @@ def parse_args() -> argparse.Namespace:
         description="Tune two-stage price forecasting models with Optuna"
     )
     parser.add_argument(
-        "--trials", type=int, default=20, help="Number of Optuna trials per stage"
+        "--trials", type=int, default=10, help="Number of Optuna trials per stage"
     )
     parser.add_argument(
         "--cv-splits-hourly",
         type=int,
-        default=4,
+        default=3,
         help="TimeSeriesSplit folds for CV hourly model",
     )
     parser.add_argument(
